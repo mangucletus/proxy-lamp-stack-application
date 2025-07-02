@@ -1,0 +1,215 @@
+{
+    "agent": {
+        "metrics_collection_interval": 60,
+        "run_as_user": "cwagent"
+    },
+    "metrics": {
+        "namespace": "ProxyLAMP/Application",
+        "metrics_collected": {
+            "cpu": {
+                "measurement": [
+                    {
+                        "name": "cpu_usage_idle",
+                        "rename": "CPU_USAGE_IDLE",
+                        "unit": "Percent"
+                    },
+                    {
+                        "name": "cpu_usage_iowait",
+                        "rename": "CPU_USAGE_IOWAIT",
+                        "unit": "Percent"
+                    },
+                    {
+                        "name": "cpu_usage_user",
+                        "rename": "CPU_USAGE_USER",
+                        "unit": "Percent"
+                    },
+                    {
+                        "name": "cpu_usage_system",
+                        "rename": "CPU_USAGE_SYSTEM",
+                        "unit": "Percent"
+                    }
+                ],
+                "metrics_collection_interval": 60,
+                "resources": [
+                    "*"
+                ],
+                "totalcpu": true
+            },
+            "disk": {
+                "measurement": [
+                    {
+                        "name": "used_percent",
+                        "rename": "DISK_USED_PERCENT",
+                        "unit": "Percent"
+                    },
+                    {
+                        "name": "inodes_free",
+                        "rename": "DISK_INODES_FREE",
+                        "unit": "Count"
+                    }
+                ],
+                "metrics_collection_interval": 60,
+                "resources": [
+                    "*"
+                ]
+            },
+            "diskio": {
+                "measurement": [
+                    {
+                        "name": "io_time",
+                        "rename": "DISKIO_IO_TIME",
+                        "unit": "Milliseconds"
+                    },
+                    {
+                        "name": "read_bytes",
+                        "rename": "DISKIO_READ_BYTES",
+                        "unit": "Bytes"
+                    },
+                    {
+                        "name": "write_bytes",
+                        "rename": "DISKIO_WRITE_BYTES",
+                        "unit": "Bytes"
+                    },
+                    {
+                        "name": "reads",
+                        "rename": "DISKIO_READS",
+                        "unit": "Count"
+                    },
+                    {
+                        "name": "writes",
+                        "rename": "DISKIO_WRITES",
+                        "unit": "Count"
+                    }
+                ],
+                "metrics_collection_interval": 60,
+                "resources": [
+                    "*"
+                ]
+            },
+            "mem": {
+                "measurement": [
+                    {
+                        "name": "mem_used_percent",
+                        "rename": "MEM_USED_PERCENT",
+                        "unit": "Percent"
+                    },
+                    {
+                        "name": "mem_available_percent",
+                        "rename": "MEM_AVAILABLE_PERCENT",
+                        "unit": "Percent"
+                    },
+                    {
+                        "name": "mem_used",
+                        "rename": "MEM_USED",
+                        "unit": "Bytes"
+                    },
+                    {
+                        "name": "mem_cached",
+                        "rename": "MEM_CACHED",
+                        "unit": "Bytes"
+                    }
+                ],
+                "metrics_collection_interval": 60
+            },
+            "netstat": {
+                "measurement": [
+                    {
+                        "name": "tcp_established",
+                        "rename": "NETSTAT_TCP_ESTABLISHED",
+                        "unit": "Count"
+                    },
+                    {
+                        "name": "tcp_time_wait",
+                        "rename": "NETSTAT_TCP_TIME_WAIT",
+                        "unit": "Count"
+                    }
+                ],
+                "metrics_collection_interval": 60
+            },
+            "processes": {
+                "measurement": [
+                    {
+                        "name": "running",
+                        "rename": "PROCESSES_RUNNING",
+                        "unit": "Count"
+                    },
+                    {
+                        "name": "sleeping",
+                        "rename": "PROCESSES_SLEEPING",
+                        "unit": "Count"
+                    },
+                    {
+                        "name": "dead",
+                        "rename": "PROCESSES_DEAD",
+                        "unit": "Count"
+                    }
+                ],
+                "metrics_collection_interval": 60
+            },
+            "swap": {
+                "measurement": [
+                    {
+                        "name": "swap_used_percent",
+                        "rename": "SWAP_USED_PERCENT",
+                        "unit": "Percent"
+                    }
+                ],
+                "metrics_collection_interval": 60
+            }
+        },
+        "append_dimensions": {
+            "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+            "ImageId": "${aws:ImageId}",
+            "InstanceId": "${aws:InstanceId}",
+            "InstanceType": "${aws:InstanceType}"
+        }
+    },
+    "logs": {
+        "logs_collected": {
+            "files": {
+                "collect_list": [
+                    {
+                        "file_path": "/var/log/apache2/access.log",
+                        "log_group_name": "/aws/ec2/proxy-lamp/apache/access",
+                        "log_stream_name": "{instance_id}/apache-access.log",
+                        "timezone": "UTC",
+                        "timestamp_format": "%d/%b/%Y:%H:%M:%S %z",
+                        "multi_line_start_pattern": "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+                        "encoding": "utf-8"
+                    },
+                    {
+                        "file_path": "/var/log/apache2/error.log",
+                        "log_group_name": "/aws/ec2/proxy-lamp/apache/error",
+                        "log_stream_name": "{instance_id}/apache-error.log",
+                        "timezone": "UTC",
+                        "timestamp_format": "%a %b %d %H:%M:%S.%f %Y",
+                        "multi_line_start_pattern": "^\\[\\w{3} \\w{3} \\d{2}",
+                        "encoding": "utf-8"
+                    },
+                    {
+                        "file_path": "/var/log/cloud-init-output.log",
+                        "log_group_name": "/aws/ec2/proxy-lamp/cloud-init",
+                        "log_stream_name": "{instance_id}/cloud-init.log",
+                        "timezone": "UTC",
+                        "encoding": "utf-8"
+                    },
+                    {
+                        "file_path": "/var/log/proxy-lamp-app.log",
+                        "log_group_name": "/aws/ec2/proxy-lamp/application",
+                        "log_stream_name": "{instance_id}/application.log",
+                        "timezone": "UTC",
+                        "encoding": "utf-8"
+                    },
+                    {
+                        "file_path": "/var/log/proxy-lamp-metrics.log",
+                        "log_group_name": "/aws/ec2/proxy-lamp/metrics",
+                        "log_stream_name": "{instance_id}/custom-metrics.log",
+                        "timezone": "UTC",
+                        "encoding": "utf-8"
+                    }
+                ]
+            }
+        },
+        "log_stream_name": "{instance_id}/{hostname}"
+    }
+}

@@ -1,0 +1,752 @@
+/* === GLOBAL STYLES === */
+* {
+    margin: 0;
+    /* Remove default margin from all elements */
+    padding: 0;
+    /* Remove default padding from all elements */
+    box-sizing: border-box;
+    /* Includes padding and border in element's total width and height */
+}
+
+/* Body layout and typography */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* Font fallback list */
+    line-height: 1.6;
+    /* Improves readability by increasing line spacing */
+    color: #2c3e50;
+    /* Updated text color (dark blue-gray) */
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    /* Updated diagonal gradient background (purple-blue) */
+    min-height: 100vh;
+    /* Ensures body takes at least full viewport height */
+    padding: 20px;
+    /* Adds spacing around the content */
+}
+
+/* === MAIN CONTAINER === */
+.container {
+    max-width: 800px;
+    /* Restricts width for readability */
+    margin: 0 auto;
+    /* Horizontally centers the container */
+    background: rgba(255, 255, 255, 0.95);
+    /* Slightly transparent white background */
+    border-radius: 15px;
+    /* Rounded corners */
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+    /* Soft outer shadow for depth */
+    overflow: hidden;
+    /* Hides content that spills outside */
+    backdrop-filter: blur(10px);
+    /* Adds a blur effect behind the container (for glassmorphism) */
+}
+
+/* === HEADER SECTION === */
+header {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    /* Updated red gradient background */
+    color: white;
+    /* White text */
+    padding: 30px;
+    /* Inner spacing */
+    text-align: center;
+    /* Centered content */
+}
+
+header h1 {
+    font-size: 2.5em;
+    /* Large heading size */
+    margin-bottom: 10px;
+    /* Spacing below heading */
+    font-weight: 700;
+    /* Bold text */
+}
+
+header p {
+    font-size: 1.1em;
+    /* Slightly larger paragraph */
+    opacity: 0.9;
+    /* Slightly transparent */
+}
+
+/* === TASK INPUT FORM === */
+.add-task-form {
+    padding: 30px;
+    /* Inner padding */
+    background: #ecf0f1;
+    /* Updated light gray background */
+    border-bottom: 1px solid #bdc3c7;
+    /* Updated subtle bottom border */
+}
+
+.add-task-form form {
+    display: flex;
+    /* Arrange inputs in a row */
+    gap: 15px;
+    /* Space between inputs */
+    align-items: center;
+    /* Align vertically */
+}
+
+.add-task-form input[type="text"] {
+    flex: 1;
+    /* Expands to fill available space */
+    padding: 15px 20px;
+    /* Padding inside input */
+    border: 2px solid #95a5a6;
+    /* Updated light gray border */
+    border-radius: 10px;
+    /* Rounded corners */
+    font-size: 16px;
+    /* Font size */
+    transition: all 0.3s ease;
+    /* Smooth hover/focus effects */
+    background: white;
+    /* Input background */
+}
+
+.add-task-form input[type="text"]:focus {
+    outline: none;
+    /* Remove default browser focus style */
+    border-color: #e74c3c;
+    /* Updated red border on focus */
+    box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.1);
+    /* Updated red glow around input */
+}
+
+.add-task-form button {
+    padding: 15px 30px;
+    /* Size of button */
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    /* Updated red gradient */
+    color: white;
+    /* White text */
+    border: none;
+    /* No border */
+    border-radius: 10px;
+    /* Rounded corners */
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    /* Pointer cursor on hover */
+    transition: all 0.3s ease;
+    /* Smooth transitions */
+    white-space: nowrap;
+    /* Prevents button text from wrapping */
+}
+
+.add-task-form button:hover {
+    transform: translateY(-2px);
+    /* Slight lift effect */
+    box-shadow: 0 5px 15px rgba(231, 76, 60, 0.3);
+    /* Updated red shadow */
+}
+
+/* === TASK DISPLAY AREA === */
+.tasks-container {
+    padding: 30px;
+}
+
+.tasks-container h2 {
+    margin-bottom: 25px;
+    color: #2c3e50;
+    /* Updated dark blue-gray */
+    font-size: 1.8em;
+    font-weight: 600;
+}
+
+.task-list {
+    list-style: none;
+    /* Remove bullet points */
+}
+
+/* === INDIVIDUAL TASK ITEM === */
+.task-item {
+    background: white;
+    margin-bottom: 15px;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    display: flex;
+    /* Arrange content in row */
+    justify-content: space-between;
+    /* Space between content and actions */
+    align-items: center;
+    border-left: 4px solid #3498db;
+    /* Updated blue vertical accent */
+    transition: all 0.3s ease;
+}
+
+.task-item:hover {
+    transform: translateY(-2px);
+    /* Lift on hover */
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+    /* Stronger shadow */
+}
+
+.task-content {
+    flex: 1;
+    /* Fills remaining space */
+}
+
+.task-text {
+    display: block;
+    font-size: 1.1em;
+    font-weight: 500;
+    color: #2c3e50;
+    /* Updated dark blue-gray */
+    margin-bottom: 5px;
+}
+
+.task-date {
+    color: #7f8c8d;
+    /* Updated gray color */
+    font-size: 0.9em;
+    /* Smaller text */
+}
+
+.task-actions {
+    margin-left: 20px;
+}
+
+/* === DELETE BUTTON === */
+.delete-btn {
+    background: linear-gradient(135deg, #e67e22, #d35400);
+    /* Updated orange gradient */
+    color: white;
+    padding: 8px 16px;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.delete-btn:hover {
+    transform: translateY(-1px);
+    /* Slight lift */
+    box-shadow: 0 3px 10px rgba(230, 126, 34, 0.3);
+    /* Updated orange glow */
+}
+
+/* === NO TASK MESSAGE === */
+.no-tasks {
+    text-align: center;
+    padding: 60px 20px;
+    color: #7f8c8d;
+    /* Updated gray color */
+}
+
+.no-tasks p {
+    font-size: 1.2em;
+    font-weight: 500;
+}
+
+/* === FOOTER === */
+footer {
+    background: #ecf0f1;
+    /* Updated light gray background */
+    padding: 20px;
+    text-align: center;
+    color: #7f8c8d;
+    /* Updated gray color */
+    border-top: 1px solid #bdc3c7;
+    /* Updated border color */
+}
+
+/* === RESPONSIVE STYLES FOR SMALL SCREENS === */
+@media (max-width: 768px) {
+    .container {
+        margin: 10px;
+        border-radius: 10px;
+    }
+
+    header {
+        padding: 20px;
+    }
+
+    header h1 {
+        font-size: 2em;
+    }
+
+    .add-task-form {
+        padding: 20px;
+    }
+
+    .add-task-form form {
+        flex-direction: column;
+        /* Stack form fields vertically */
+        gap: 10px;
+    }
+
+    .add-task-form input[type="text"],
+    .add-task-form button {
+        width: 100%;
+        /* Full width for smaller screens */
+        padding: 12px 15px;
+    }
+
+    .tasks-container {
+        padding: 20px;
+    }
+
+    .task-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .task-actions {
+        margin-left: 0;
+        align-self: flex-end;
+    }
+}
+
+/* === FEEDBACK MESSAGES === */
+.message {
+    padding: 15px;
+    margin: 20px 30px;
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+.success {
+    background: #d5f4e6;
+    /* Updated light green background */
+    color: #27ae60;
+    /* Updated green text */
+    border: 1px solid #2ecc71;
+    /* Updated green border */
+}
+
+.error {
+    background: #fadbd8;
+    /* Updated light red background */
+    color: #e74c3c;
+    /* Updated red text */
+    border: 1px solid #e74c3c;
+    /* Updated red border */
+}
+
+/* === HEALTH CHECK INDICATOR === */
+.health-indicator {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #27ae60;
+    /* Green indicator */
+    box-shadow: 0 0 10px rgba(39, 174, 96, 0.5);
+    z-index: 1000;
+}
+
+/* === LOAD BALANCER BADGE === */
+.lb-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(52, 152, 219, 0.9);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* === PERFORMANCE METRICS DISPLAY === */
+.metrics-bar {
+    background: #34495e;
+    color: white;
+    padding: 10px 20px;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.metric-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.metric-label {
+    font-weight: 600;
+}
+
+.metric-value {
+    background: rgba(52, 152, 219, 0.2);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+/* === HEADER ARCHITECTURE INFO === */
+.architecture-info {
+    margin-top: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+}
+
+.architecture-info span {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 5px 12px;
+    border-radius: 15px;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+/* === DASHBOARD STATISTICS === */
+.dashboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 20px;
+    padding: 30px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.stat-card {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+}
+
+.stat-number {
+    font-size: 2.5em;
+    font-weight: 700;
+    color: #e74c3c;
+    margin-bottom: 5px;
+}
+
+.stat-label {
+    font-size: 0.9em;
+    color: #7f8c8d;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* === ENHANCED TASK FORM === */
+.add-task-form h3 {
+    margin-bottom: 15px;
+    color: #2c3e50;
+    font-size: 1.3em;
+    font-weight: 600;
+}
+
+.add-task-form button .btn-loading {
+    opacity: 0.7;
+}
+
+/* === SECTION HEADERS === */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.task-count {
+    background: #3498db;
+    color: white;
+    padding: 5px 12px;
+    border-radius: 15px;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+/* === ENHANCED TASK ITEMS === */
+.task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.task-status {
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.task-status.pending {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.task-status.completed {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.task-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.task-updated {
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* === ENHANCED NO TASKS MESSAGE === */
+.no-tasks {
+    text-align: center;
+    padding: 60px 20px;
+    color: #7f8c8d;
+}
+
+.no-tasks-icon {
+    font-size: 4em;
+    margin-bottom: 20px;
+}
+
+.no-tasks h3 {
+    font-size: 1.5em;
+    margin-bottom: 10px;
+    color: #2c3e50;
+}
+
+.no-tasks p {
+    font-size: 1.1em;
+    margin-bottom: 30px;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.no-tasks-features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.feature {
+    background: rgba(52, 152, 219, 0.1);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+/* === SYSTEM INFORMATION SECTION === */
+.system-info {
+    padding: 30px;
+    background: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+}
+
+.system-info h3 {
+    text-align: center;
+    margin-bottom: 30px;
+    color: #2c3e50;
+    font-size: 1.5em;
+}
+
+.architecture-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.arch-item {
+    background: white;
+    padding: 25px 20px;
+    border-radius: 12px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    border-top: 4px solid #3498db;
+}
+
+.arch-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.arch-icon {
+    font-size: 2.5em;
+    margin-bottom: 15px;
+}
+
+.arch-title {
+    font-size: 1.2em;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 8px;
+}
+
+.arch-desc {
+    font-size: 0.9em;
+    color: #7f8c8d;
+    line-height: 1.4;
+}
+
+/* === ENHANCED FOOTER === */
+footer {
+    background: #ecf0f1;
+    padding: 25px 20px;
+    text-align: center;
+    color: #7f8c8d;
+    border-top: 1px solid #bdc3c7;
+}
+
+.footer-content {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.deployment-info {
+    margin-bottom: 15px;
+}
+
+.deployment-info p {
+    margin: 5px 0;
+    font-size: 0.95em;
+}
+
+.footer-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+}
+
+.footer-links a {
+    color: #3498db;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+.footer-links a:hover {
+    color: #e74c3c;
+}
+
+.separator {
+    color: #bdc3c7;
+}
+
+/* === ANIMATIONS === */
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+
+    100% {
+        opacity: 1;
+    }
+}
+
+.health-indicator {
+    animation: pulse 2s infinite;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.task-item {
+    animation: slideIn 0.3s ease-out;
+}
+
+.message {
+    animation: slideIn 0.3s ease-out;
+}
+
+/* === RESPONSIVE ENHANCEMENTS === */
+@media (max-width: 768px) {
+    .metrics-bar {
+        font-size: 11px;
+        padding: 8px 15px;
+    }
+
+    .architecture-info {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .dashboard {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        padding: 20px;
+    }
+
+    .stat-number {
+        font-size: 2em;
+    }
+
+    .architecture-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .task-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .no-tasks-features {
+        grid-template-columns: 1fr;
+    }
+
+    .footer-links {
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .separator {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .dashboard {
+        grid-template-columns: 1fr;
+    }
+
+    .metrics-bar {
+        flex-direction: column;
+        gap: 5px;
+        text-align: center;
+    }
+}
