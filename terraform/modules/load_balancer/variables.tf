@@ -52,7 +52,7 @@ variable "healthy_threshold" {
 variable "unhealthy_threshold" {
   description = "Number of consecutive failed health checks"
   type        = number
-  default     = 3
+  default     = 5
 }
 
 # SSL/HTTPS configuration
