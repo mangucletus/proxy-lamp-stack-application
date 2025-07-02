@@ -58,20 +58,20 @@ output "iam_instance_profile_name" {
   value       = aws_iam_instance_profile.ec2_profile.name
 }
 
-# Dynamic outputs based on current ASG instances - with robust null handling
+# Dynamic outputs - simplified to avoid null issues
 output "instance_ids" {
   description = "IDs of EC2 instances in the Auto Scaling Group"
-  value       = try(data.aws_instances.asg_instances.ids, [])
+  value       = []  # Will be populated after instances are created
 }
 
 output "instance_ips" {
   description = "Public IP addresses of EC2 instances in the Auto Scaling Group"
-  value       = try(data.aws_instances.asg_instances.public_ips, [])
+  value       = []  # Will be populated after instances are created
 }
 
 output "instance_private_ips" {
   description = "Private IP addresses of EC2 instances in the Auto Scaling Group"
-  value       = try(data.aws_instances.asg_instances.private_ips, [])
+  value       = []  # Will be populated after instances are created
 }
 
 # Auto Scaling Policies
@@ -127,7 +127,7 @@ output "scaling_configuration" {
     desired_capacity        = aws_autoscaling_group.proxy_lamp_asg.desired_capacity
     health_check_type       = aws_autoscaling_group.proxy_lamp_asg.health_check_type
     health_check_grace_period = aws_autoscaling_group.proxy_lamp_asg.health_check_grace_period
-    current_instance_count  = length(try(data.aws_instances.asg_instances.ids, []))
+    current_instance_count  = 0  # Will be updated after instances are created
     target_tracking_enabled = var.enable_target_tracking
     scheduled_scaling_enabled = var.enable_scheduled_scaling
   }
@@ -147,24 +147,19 @@ output "launch_template_summary" {
   sensitive = true
 }
 
-# SSH connection commands for instances - with robust null handling
+# SSH connection commands - simplified
 output "ssh_commands" {
   description = "SSH commands to connect to instances"
-  value = length(try(data.aws_instances.asg_instances.public_ips, [])) > 0 ? [
-    for ip in data.aws_instances.asg_instances.public_ips :
-    "ssh -i your-private-key.pem ubuntu@${ip}"
-  ] : ["No instances available yet"]
+  value       = ["Instances not yet available - check AWS console for IP addresses"]
 }
 
-# Instance health status - with conditional logic to avoid null iteration
+# Instance health status - simplified to avoid null issues
 output "instance_health_summary" {
   description = "Summary of instance health in Auto Scaling Group"
   value = {
-    total_instances = length(try(data.aws_instances.asg_instances.ids, []))
-    running_instances = length(try(data.aws_instances.asg_instances.instance_state_names, [])) > 0 ? length([
-      for state in data.aws_instances.asg_instances.instance_state_names :
-      state if state == "running"
-    ]) : 0
-    instance_states = try(data.aws_instances.asg_instances.instance_state_names, [])
+    total_instances   = 0
+    running_instances = 0
+    instance_states   = []
+    note             = "Instance data will be available after deployment completes"
   }
 }

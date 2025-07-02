@@ -4,19 +4,16 @@
 output "load_balancer_dns" {
   description = "DNS name of the Application Load Balancer"
   value       = module.load_balancer.load_balancer_dns
-  # Primary endpoint for accessing the application through the load balancer
 }
 
 output "load_balancer_zone_id" {
   description = "Zone ID of the Application Load Balancer"
   value       = module.load_balancer.load_balancer_zone_id
-  # Used for Route53 alias records if needed
 }
 
 output "load_balancer_arn" {
   description = "ARN of the Application Load Balancer"
   value       = module.load_balancer.load_balancer_arn
-  # Used for monitoring and CloudWatch configuration
 }
 
 #-------------------------------
@@ -25,13 +22,11 @@ output "load_balancer_arn" {
 output "application_url" {
   description = "URL to access the load-balanced application"
   value       = "http://${module.load_balancer.load_balancer_dns}"
-  # Constructs the HTTP URL using the load balancer DNS
 }
 
 output "health_check_url" {
   description = "URL for application health checks"
   value       = "http://${module.load_balancer.load_balancer_dns}/health.php"
-  # Health check endpoint for monitoring
 }
 
 #-------------------------------
@@ -40,19 +35,16 @@ output "health_check_url" {
 output "autoscaling_group_arn" {
   description = "ARN of the Auto Scaling Group"
   value       = module.compute.autoscaling_group_arn
-  # Used for monitoring and scaling policies
 }
 
 output "autoscaling_group_name" {
   description = "Name of the Auto Scaling Group"
   value       = module.compute.autoscaling_group_name
-  # Used for CloudWatch monitoring and scaling policies
 }
 
 output "instance_ips" {
-  description = "Public IP addresses of EC2 instances"
-  value       = module.compute.instance_ips
-  # Used by deployment scripts to SSH into instances
+  description = "Public IP addresses of EC2 instances (check AWS console for actual IPs)"
+  value       = ["Check AWS EC2 console for instance IP addresses"]
 }
 
 #-------------------------------
@@ -61,13 +53,11 @@ output "instance_ips" {
 output "database_port" {
   description = "RDS MySQL database port"
   value       = module.database.db_port
-  # Database connection port
 }
 
 output "database_name" {
   description = "RDS MySQL database name"
   value       = module.database.db_name
-  # Database name for application configuration
 }
 
 #-------------------------------
@@ -76,19 +66,16 @@ output "database_name" {
 output "vpc_id" {
   description = "ID of the VPC"
   value       = module.vpc.vpc_id
-  # VPC identifier for reference
 }
 
 output "public_subnet_ids" {
   description = "IDs of the public subnets"
   value       = module.vpc.public_subnet_ids
-  # Public subnet identifiers
 }
 
 output "private_subnet_ids" {
   description = "IDs of the private subnets"
   value       = module.vpc.private_subnet_ids
-  # Private subnet identifiers for database
 }
 
 #-------------------------------
@@ -97,19 +84,16 @@ output "private_subnet_ids" {
 output "alb_security_group_id" {
   description = "ID of the Application Load Balancer security group"
   value       = module.security.alb_sg_id
-  # ALB security group identifier
 }
 
 output "web_security_group_id" {
   description = "ID of the web tier security group"
   value       = module.security.web_sg_id
-  # Web tier security group identifier
 }
 
 output "database_security_group_id" {
   description = "ID of the database security group"
   value       = module.security.database_sg_id
-  # Database security group identifier
 }
 
 #-------------------------------
@@ -118,13 +102,11 @@ output "database_security_group_id" {
 output "cloudwatch_dashboard_url" {
   description = "URL to the CloudWatch dashboard"
   value       = module.monitoring.dashboard_url
-  # Direct link to monitoring dashboard
 }
 
 output "cloudwatch_log_group_names" {
   description = "Names of CloudWatch log groups"
   value       = module.monitoring.log_group_names
-  # Log group names for troubleshooting
 }
 
 #-------------------------------
@@ -132,11 +114,7 @@ output "cloudwatch_log_group_names" {
 #-------------------------------
 output "ssh_commands" {
   description = "SSH commands to connect to instances"
-  value = [
-    for ip in module.compute.instance_ips :
-    "ssh -i your-private-key.pem ubuntu@${ip}"
-  ]
-  # Ready-to-use SSH commands for each instance
+  value       = ["Use AWS EC2 console to get instance IP addresses, then: ssh -i your-private-key.pem ubuntu@INSTANCE_IP"]
 }
 
 #-------------------------------
@@ -149,12 +127,11 @@ output "deployment_summary" {
     load_balancer_dns    = module.load_balancer.load_balancer_dns
     application_url      = "http://${module.load_balancer.load_balancer_dns}"
     health_check_url     = "http://${module.load_balancer.load_balancer_dns}/health.php"
-    instance_count       = length(module.compute.instance_ips)
     monitoring_dashboard = module.monitoring.dashboard_url
     deployment_timestamp = timestamp()
+    note                 = "Check AWS EC2 console for instance details"
   }
-  # Comprehensive deployment summary
-  sensitive = true # Added to fix sensitive value error
+  sensitive = true
 }
 
 #-------------------------------
@@ -164,7 +141,6 @@ output "database_endpoint" {
   description = "RDS MySQL database endpoint"
   value       = module.database.db_endpoint
   sensitive   = true
-  # Database connection endpoint (marked sensitive)
 }
 
 #-------------------------------
@@ -173,11 +149,9 @@ output "database_endpoint" {
 output "terraform_state_bucket" {
   description = "S3 bucket storing Terraform state"
   value       = "proxy-lamp-stack-tfstate-cletusmangu-1749764"
-  # State bucket reference
 }
 
 output "deployment_id" {
   description = "Unique deployment identifier"
   value       = random_id.deployment_id.hex
-  # Unique identifier for this deployment
 }
