@@ -58,7 +58,7 @@ output "iam_instance_profile_name" {
   value       = aws_iam_instance_profile.ec2_profile.name
 }
 
-# Dynamic outputs based on current ASG instances - with null handling
+# Dynamic outputs based on current ASG instances - with robust null handling
 output "instance_ids" {
   description = "IDs of EC2 instances in the Auto Scaling Group"
   value       = try(data.aws_instances.asg_instances.ids, [])
@@ -147,24 +147,24 @@ output "launch_template_summary" {
   sensitive = true
 }
 
-# SSH connection commands for instances - with null handling
+# SSH connection commands for instances - with robust null handling
 output "ssh_commands" {
   description = "SSH commands to connect to instances"
-  value = [
-    for ip in try(data.aws_instances.asg_instances.public_ips, []) :
+  value = length(try(data.aws_instances.asg_instances.public_ips, [])) > 0 ? [
+    for ip in data.aws_instances.asg_instances.public_ips :
     "ssh -i your-private-key.pem ubuntu@${ip}"
-  ]
+  ] : ["No instances available yet"]
 }
 
-# Instance health status - with null handling
+# Instance health status - with conditional logic to avoid null iteration
 output "instance_health_summary" {
   description = "Summary of instance health in Auto Scaling Group"
   value = {
     total_instances = length(try(data.aws_instances.asg_instances.ids, []))
-    running_instances = length([
-      for state in try(data.aws_instances.asg_instances.instance_state_names, []) :
+    running_instances = length(try(data.aws_instances.asg_instances.instance_state_names, [])) > 0 ? length([
+      for state in data.aws_instances.asg_instances.instance_state_names :
       state if state == "running"
-    ])
+    ]) : 0
     instance_states = try(data.aws_instances.asg_instances.instance_state_names, [])
   }
 }
