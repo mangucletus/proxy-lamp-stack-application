@@ -69,6 +69,8 @@ module "database" {
   db_password        = var.db_password
   deployment_suffix  = local.deployment_suffix
   tags               = local.common_tags
+
+  enable_performance_insights = false #disable Performance Insights sice db.t3.micro doesn't support it
 }
 
 # Load Balancer Module - Application Load Balancer for high availability
