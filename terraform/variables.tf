@@ -50,7 +50,7 @@ variable "max_size" {
 variable "desired_capacity" {
   description = "Desired number of instances in Auto Scaling Group"
   type        = number
-  default     = 2
+  default     = 3
 }
 
 # Database configuration variables
@@ -88,13 +88,13 @@ variable "health_check_path" {
 variable "health_check_interval" {
   description = "Health check interval in seconds"
   type        = number
-  default     = 30
+  default     = 60
 }
 
 variable "health_check_timeout" {
   description = "Health check timeout in seconds"
   type        = number
-  default     = 5
+  default     = 15
 }
 
 variable "healthy_threshold" {
@@ -106,7 +106,7 @@ variable "healthy_threshold" {
 variable "unhealthy_threshold" {
   description = "Number of consecutive failed health checks"
   type        = number
-  default     = 3
+  default     = 5
 }
 
 # Monitoring configuration

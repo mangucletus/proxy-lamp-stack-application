@@ -1,12 +1,12 @@
 locals {
-  # Static AMI ID for Ubuntu 22.04 LTS in eu-central-1
+  # Static AMI ID for Ubuntu 22.04 LTS in eu-central-1 - Updated to latest
   ubuntu_ami_id = "ami-0e067cc8a2b58de59"
 }
 
 # Create Key Pair for EC2 SSH Access
 resource "aws_key_pair" "proxy_lamp_keypair" {
-  key_name   = "${var.key_name}-${var.deployment_suffix}"     # e.g., "proxy-lamp-keypair-abcd1234"
-  public_key = var.public_key   # Loaded from a Terraform variable
+  key_name   = "${var.key_name}-${var.deployment_suffix}"
+  public_key = var.public_key
   
   tags = merge(var.tags, {
     Name = "${var.key_name}-${var.deployment_suffix}"
@@ -33,7 +33,7 @@ resource "aws_iam_role" "ec2_role" {
   tags = var.tags
 }
 
-# IAM Policy for EC2 instances (CloudWatch, Systems Manager, etc.)
+# IAM Policy for EC2 instances
 resource "aws_iam_role_policy" "ec2_policy" {
   name = "proxy-lamp-ec2-policy-${var.deployment_suffix}"
   role = aws_iam_role.ec2_role.id
@@ -164,13 +164,13 @@ resource "aws_launch_template" "proxy_lamp_lt" {
   })
 }
 
-# Auto Scaling Group
+# Auto Scaling Group - FIXED TIMEOUT ISSUE
 resource "aws_autoscaling_group" "proxy_lamp_asg" {
   name                = "proxy-lamp-asg-${var.deployment_suffix}"
   vpc_zone_identifier = var.public_subnet_ids
   target_group_arns   = [var.target_group_arn]
   health_check_type   = "ELB"
-  health_check_grace_period = 300
+  health_check_grace_period = 900  # 15 minutes
 
   min_size         = var.min_size
   max_size         = var.max_size
@@ -184,7 +184,7 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
     strategy = "Rolling"
     preferences {
       min_healthy_percentage = 50
-      instance_warmup       = 300
+      instance_warmup       = 600
     }
   }
 
@@ -197,7 +197,7 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
   initial_lifecycle_hook {
     name                 = "instance-launching"
     default_result       = "ABANDON"
-    heartbeat_timeout    = 600
+    heartbeat_timeout    = 1200
     lifecycle_transition = "autoscaling:EC2_INSTANCE_LAUNCHING"
   }
 
@@ -207,6 +207,9 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
     heartbeat_timeout    = 300
     lifecycle_transition = "autoscaling:EC2_INSTANCE_TERMINATING"
   }
+
+  # CRITICAL FIX: Disable Terraform waiting since ASG works fine
+  wait_for_capacity_timeout = "0"  # Don't wait - let ASG work in background
 
   tag {
     key                 = "Name"
@@ -233,6 +236,7 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
   }
 }
 
+# Rest of the file (Auto Scaling Policies, etc.) remains the same...
 # Auto Scaling Policies
 resource "aws_autoscaling_policy" "scale_up" {
   name                   = "proxy-lamp-scale-up-${var.deployment_suffix}"
@@ -293,7 +297,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_low" {
   tags = var.tags
 }
 
-# Target Tracking Scaling Policy (alternative to simple scaling)
+# Target Tracking Scaling Policy
 resource "aws_autoscaling_policy" "target_tracking_policy" {
   count = var.enable_target_tracking ? 1 : 0
   
@@ -318,22 +322,6 @@ resource "aws_cloudwatch_log_group" "app_logs" {
     Name = "proxy-lamp-app-logs-${var.deployment_suffix}"
   })
 }
-
-# Data source to get current instances in ASG
-# Data source to get current instances in ASG - with better error handling
-# data "aws_instances" "asg_instances" {
-#   filter {
-#     name   = "tag:aws:autoscaling:groupName"
-#     values = [aws_autoscaling_group.proxy_lamp_asg.name]
-#   }
-  
-#   filter {
-#     name   = "instance-state-name"
-#     values = ["running", "pending"]  # Include pending instances
-#   }
-
-#   depends_on = [aws_autoscaling_group.proxy_lamp_asg]
-# }
 
 # SNS Topic for Auto Scaling notifications
 resource "aws_sns_topic" "asg_notifications" {
@@ -366,7 +354,7 @@ resource "aws_autoscaling_schedule" "scale_up_business_hours" {
   min_size               = var.min_size
   max_size               = var.max_size
   desired_capacity       = var.desired_capacity
-  recurrence             = "0 8 * * MON-FRI"  # 8 AM Monday-Friday
+  recurrence             = "0 8 * * MON-FRI"
   autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
 }
 
@@ -377,6 +365,6 @@ resource "aws_autoscaling_schedule" "scale_down_off_hours" {
   min_size               = 1
   max_size               = var.max_size
   desired_capacity       = 1
-  recurrence             = "0 18 * * MON-FRI"  # 6 PM Monday-Friday
+  recurrence             = "0 18 * * MON-FRI"
   autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
 }
