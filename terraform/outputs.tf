@@ -56,15 +56,8 @@ output "instance_ips" {
 }
 
 #-------------------------------
-# Database Outputs
+# Database Outputs (Non-sensitive)
 #-------------------------------
-output "database_endpoint" {
-  description = "RDS MySQL database endpoint"
-  value       = module.database.db_endpoint
-  sensitive   = true
-  # Database connection endpoint (marked sensitive)
-}
-
 output "database_port" {
   description = "RDS MySQL database port"
   value       = module.database.db_port
@@ -147,7 +140,7 @@ output "ssh_commands" {
 }
 
 #-------------------------------
-# Deployment Information
+# Deployment Information (Non-sensitive)
 #-------------------------------
 output "deployment_summary" {
   description = "Summary of deployed infrastructure"
@@ -157,11 +150,21 @@ output "deployment_summary" {
     application_url      = "http://${module.load_balancer.load_balancer_dns}"
     health_check_url     = "http://${module.load_balancer.load_balancer_dns}/health.php"
     instance_count       = length(module.compute.instance_ips)
-    database_endpoint    = module.database.db_endpoint
     monitoring_dashboard = module.monitoring.dashboard_url
     deployment_timestamp = timestamp()
   }
   # Comprehensive deployment summary
+  sensitive = true # Added to fix sensitive value error
+}
+
+#-------------------------------
+# Sensitive Database Information
+#-------------------------------
+output "database_endpoint" {
+  description = "RDS MySQL database endpoint"
+  value       = module.database.db_endpoint
+  sensitive   = true
+  # Database connection endpoint (marked sensitive)
 }
 
 #-------------------------------

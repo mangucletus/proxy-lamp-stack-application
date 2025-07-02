@@ -58,20 +58,20 @@ output "iam_instance_profile_name" {
   value       = aws_iam_instance_profile.ec2_profile.name
 }
 
-# Dynamic outputs based on current ASG instances
+# Dynamic outputs based on current ASG instances - with null handling
 output "instance_ids" {
   description = "IDs of EC2 instances in the Auto Scaling Group"
-  value       = data.aws_instances.asg_instances.ids
+  value       = try(data.aws_instances.asg_instances.ids, [])
 }
 
 output "instance_ips" {
   description = "Public IP addresses of EC2 instances in the Auto Scaling Group"
-  value       = data.aws_instances.asg_instances.public_ips
+  value       = try(data.aws_instances.asg_instances.public_ips, [])
 }
 
 output "instance_private_ips" {
   description = "Private IP addresses of EC2 instances in the Auto Scaling Group"
-  value       = data.aws_instances.asg_instances.private_ips
+  value       = try(data.aws_instances.asg_instances.private_ips, [])
 }
 
 # Auto Scaling Policies
@@ -127,7 +127,7 @@ output "scaling_configuration" {
     desired_capacity        = aws_autoscaling_group.proxy_lamp_asg.desired_capacity
     health_check_type       = aws_autoscaling_group.proxy_lamp_asg.health_check_type
     health_check_grace_period = aws_autoscaling_group.proxy_lamp_asg.health_check_grace_period
-    current_instance_count  = length(data.aws_instances.asg_instances.ids)
+    current_instance_count  = length(try(data.aws_instances.asg_instances.ids, []))
     target_tracking_enabled = var.enable_target_tracking
     scheduled_scaling_enabled = var.enable_scheduled_scaling
   }
@@ -147,24 +147,24 @@ output "launch_template_summary" {
   sensitive = true
 }
 
-# SSH connection commands for instances
+# SSH connection commands for instances - with null handling
 output "ssh_commands" {
   description = "SSH commands to connect to instances"
   value = [
-    for ip in data.aws_instances.asg_instances.public_ips :
+    for ip in try(data.aws_instances.asg_instances.public_ips, []) :
     "ssh -i your-private-key.pem ubuntu@${ip}"
   ]
 }
 
-# Instance health status
+# Instance health status - with null handling
 output "instance_health_summary" {
   description = "Summary of instance health in Auto Scaling Group"
   value = {
-    total_instances = length(data.aws_instances.asg_instances.ids)
+    total_instances = length(try(data.aws_instances.asg_instances.ids, []))
     running_instances = length([
-      for state in data.aws_instances.asg_instances.instance_state_names :
+      for state in try(data.aws_instances.asg_instances.instance_state_names, []) :
       state if state == "running"
     ])
-    instance_states = data.aws_instances.asg_instances.instance_state_names
+    instance_states = try(data.aws_instances.asg_instances.instance_state_names, [])
   }
 }

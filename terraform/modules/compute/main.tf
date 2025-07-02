@@ -320,6 +320,7 @@ resource "aws_cloudwatch_log_group" "app_logs" {
 }
 
 # Data source to get current instances in ASG
+# Data source to get current instances in ASG - with better error handling
 data "aws_instances" "asg_instances" {
   filter {
     name   = "tag:aws:autoscaling:groupName"
@@ -328,7 +329,7 @@ data "aws_instances" "asg_instances" {
   
   filter {
     name   = "instance-state-name"
-    values = ["running"]
+    values = ["running", "pending"]  # Include pending instances
   }
 
   depends_on = [aws_autoscaling_group.proxy_lamp_asg]
