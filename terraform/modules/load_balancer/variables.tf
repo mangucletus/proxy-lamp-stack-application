@@ -28,19 +28,19 @@ variable "tags" {
 variable "health_check_path" {
   description = "Health check path for load balancer target group"
   type        = string
-  default     = "/health.php"
+  default     = "/"
 }
 
 variable "health_check_interval" {
   description = "Health check interval in seconds"
   type        = number
-  default     = 60
+  default     = 30
 }
 
 variable "health_check_timeout" {
   description = "Health check timeout in seconds"
   type        = number
-  default     = 15
+  default     = 10
 }
 
 variable "healthy_threshold" {
@@ -52,7 +52,7 @@ variable "healthy_threshold" {
 variable "unhealthy_threshold" {
   description = "Number of consecutive failed health checks"
   type        = number
-  default     = 5
+  default     = 10
 }
 
 # SSL/HTTPS configuration

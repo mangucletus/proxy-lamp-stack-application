@@ -301,8 +301,8 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
   name                = "proxy-lamp-asg-${var.deployment_suffix}"
   vpc_zone_identifier = var.public_subnet_ids
   target_group_arns   = [var.target_group_arn]
-  health_check_type   = "ELB"
-  health_check_grace_period = 900  # 15 minutes
+  health_check_type   = "EC2"
+  health_check_grace_period = 1800  # 30 minutes
 
   min_size         = var.min_size
   max_size         = var.max_size

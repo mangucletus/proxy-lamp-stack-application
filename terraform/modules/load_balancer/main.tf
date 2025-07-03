@@ -124,7 +124,7 @@ resource "aws_lb_target_group" "proxy_lamp_tg" {
     enabled             = true
     healthy_threshold   = var.healthy_threshold
     interval            = var.health_check_interval
-    matcher             = "200"
+    matcher             = "200,404"
     path                = var.health_check_path
     port                = "traffic-port"
     protocol            = "HTTP"

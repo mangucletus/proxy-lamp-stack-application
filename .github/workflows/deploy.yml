@@ -94,7 +94,7 @@ jobs:
     - name: Wait for Infrastructure to be Ready
       run: |
         echo "Waiting for Auto Scaling Group instances to be fully initialized..."
-        sleep 120
+        sleep 300  # FIXED: Increased from 120 to 300 seconds (5 minutes)
 
     - name: Get Instance IPs from Auto Scaling Group
       id: get-instances
@@ -103,62 +103,82 @@ jobs:
       run: |
         echo "Getting instance IPs from Auto Scaling Group: $ASG_NAME"
         
-        # Get ALL instances, not just InService ones
+        # FIXED: Wait for instances to appear in ASG (up to 10 minutes)
+        echo "=== Waiting for instances to appear in ASG ==="
+        for attempt in {1..20}; do
+          ALL_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$ALL_INSTANCE_IDS" ] && [ "$ALL_INSTANCE_IDS" != "None" ]; then
+            echo "✅ Found instances in ASG: $ALL_INSTANCE_IDS"
+            break
+          else
+            echo "⏳ Waiting for instances in ASG... attempt $attempt/20"
+            sleep 30
+          fi
+          
+          if [ $attempt -eq 20 ]; then
+            echo "❌ No instances found in ASG after 10 minutes"
+            echo "Checking ASG configuration..."
+            aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$ASG_NAME" \
+              --query 'AutoScalingGroups[0].{MinSize:MinSize,MaxSize:MaxSize,DesiredCapacity:DesiredCapacity,Instances:Instances}' || echo "Could not get ASG info"
+            exit 1
+          fi
+        done
+        
         echo "=== All instances in ASG ==="
         aws autoscaling describe-auto-scaling-groups \
           --auto-scaling-group-names "$ASG_NAME" \
           --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,State:LifecycleState,Health:HealthStatus}' \
           --output table
         
-        # Get instance IDs from ASG (any state - running instances)
-        ALL_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
-          --auto-scaling-group-names "$ASG_NAME" \
-          --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
-          --output text)
-        
-        echo "All Instance IDs: $ALL_INSTANCE_IDS"
-        
-        if [ -z "$ALL_INSTANCE_IDS" ]; then
-          echo "❌ No instances found in Auto Scaling Group at all!"
-          exit 1
-        fi
-        
-        # Filter for running instances only (regardless of ASG lifecycle state)
-        echo "=== Checking which instances are actually running ==="
+        # FIXED: Wait for instances to be in Running state (up to 15 minutes)
+        echo "=== Waiting for instances to be in running state ==="
         RUNNING_INSTANCES=""
-        for INSTANCE_ID in $ALL_INSTANCE_IDS; do
-          INSTANCE_STATE=$(aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --query 'Reservations[0].Instances[0].State.Name' \
-            --output text 2>/dev/null || echo "unknown")
+        for attempt in {1..30}; do
+          RUNNING_INSTANCES=""
+          for INSTANCE_ID in $ALL_INSTANCE_IDS; do
+            INSTANCE_STATE=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].State.Name' \
+              --output text 2>/dev/null || echo "unknown")
+            
+            echo "Instance $INSTANCE_ID state: $INSTANCE_STATE"
+            
+            if [ "$INSTANCE_STATE" = "running" ]; then
+              RUNNING_INSTANCES="$RUNNING_INSTANCES $INSTANCE_ID"
+            fi
+          done
           
-          echo "Instance $INSTANCE_ID state: $INSTANCE_STATE"
+          RUNNING_INSTANCES=$(echo "$RUNNING_INSTANCES" | xargs)
           
-          if [ "$INSTANCE_STATE" = "running" ]; then
-            RUNNING_INSTANCES="$RUNNING_INSTANCES $INSTANCE_ID"
+          if [ -n "$RUNNING_INSTANCES" ]; then
+            echo "✅ Found running instances: $RUNNING_INSTANCES"
+            break
+          else
+            echo "⏳ Waiting for running instances... attempt $attempt/30"
+            sleep 30
+          fi
+          
+          if [ $attempt -eq 30 ]; then
+            echo "❌ No running instances found after 15 minutes"
+            exit 1
           fi
         done
         
-        RUNNING_INSTANCES=$(echo "$RUNNING_INSTANCES" | xargs)  # Trim whitespace
-        echo "Running instances: $RUNNING_INSTANCES"
-        
-        if [ -z "$RUNNING_INSTANCES" ]; then
-          echo "❌ No running instances found!"
-          exit 1
-        fi
-        
-        # Get public IP addresses for running instances - FIXED: Proper formatting
+        # Get IP addresses for running instances
         echo "=== Getting IP addresses for running instances ==="
         INSTANCE_IPS_RAW=$(aws ec2 describe-instances \
           --instance-ids $RUNNING_INSTANCES \
           --query 'Reservations[].Instances[?State.Name==`running`].PublicIpAddress' \
           --output text)
         
-        # FIXED: Convert newlines and tabs to spaces, remove empty entries
         INSTANCE_IPS=$(echo "$INSTANCE_IPS_RAW" | tr '\n\t' ' ' | tr -s ' ' | xargs)
         
-        echo "Public IPs (raw): $INSTANCE_IPS_RAW"
-        echo "Public IPs (formatted): $INSTANCE_IPS"
+        echo "Public IPs: $INSTANCE_IPS"
         
         # If no public IPs, try private IPs
         if [ -z "$INSTANCE_IPS" ] || [ "$INSTANCE_IPS" = "None" ]; then
@@ -168,28 +188,16 @@ jobs:
             --query 'Reservations[].Instances[?State.Name==`running`].PrivateIpAddress' \
             --output text)
           
-          # FIXED: Same formatting for private IPs
           INSTANCE_IPS=$(echo "$INSTANCE_IPS_RAW" | tr '\n\t' ' ' | tr -s ' ' | xargs)
-          echo "Private IPs (formatted): $INSTANCE_IPS"
+          echo "Private IPs: $INSTANCE_IPS"
         fi
         
+        # Validate IPs
         if [ -z "$INSTANCE_IPS" ]; then
           echo "❌ No IP addresses found for running instances!"
           exit 1
         fi
         
-        # FIXED: Validate IP format before storing
-        echo "Validating IP addresses..."
-        for IP in $INSTANCE_IPS; do
-          if [[ $IP =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-            echo "✅ Valid IP: $IP"
-          else
-            echo "❌ Invalid IP format: $IP"
-            exit 1
-          fi
-        done
-        
-        # Store IPs in environment for next step
         echo "INSTANCE_IPS=$INSTANCE_IPS" >> $GITHUB_ENV
         echo "✅ Found instances with IPs: $INSTANCE_IPS"
 
@@ -198,38 +206,29 @@ jobs:
         PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
         LOAD_BALANCER_DNS: ${{ needs.terraform.outputs.load_balancer_dns }}
       run: |
-        # Save the private key to a PEM file
         echo "$PRIVATE_KEY" > private_key.pem
         chmod 600 private_key.pem
         
         echo "Instance IPs to deploy to: $INSTANCE_IPS"
         
-        # Validate that INSTANCE_IPS is properly formatted
         if [ -z "$INSTANCE_IPS" ]; then
           echo "❌ No instance IPs available for deployment"
           exit 1
         fi
         
-        # Check IP count
         IP_COUNT=$(echo $INSTANCE_IPS | wc -w)
         echo "Number of IPs to deploy to: $IP_COUNT"
         
-        # Check what files are available for deployment
+        # Check application files
         echo "=== Checking available files for deployment ==="
-        echo "Current directory contents:"
-        ls -la
-        
-        echo "App directory contents:"
-        if [ -d "app" ]; then
-          ls -la app/
-        else
+        if [ ! -d "app" ]; then
           echo "❌ App directory not found!"
           exit 1
         fi
         
-        echo "Monitoring directory contents:"
+        ls -la app/
+        
         if [ -d "monitoring" ]; then
-          ls -la monitoring/
           MONITORING_EXISTS=true
         else
           echo "⚠️ Monitoring directory not found - will skip monitoring setup"
@@ -247,47 +246,89 @@ jobs:
           
           TOTAL_COUNT=$((TOTAL_COUNT + 1))
           
-          # Skip if IP is empty or "None"
           if [ -z "$INSTANCE_IP" ] || [ "$INSTANCE_IP" = "None" ]; then
             echo "Skipping empty or invalid IP: $INSTANCE_IP"
             continue
           fi
           
-          # Additional IP validation
-          if ! [[ $INSTANCE_IP =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-            echo "❌ Invalid IP format: $INSTANCE_IP - skipping"
-            continue
-          fi
-          
-          # Retry logic for establishing SSH connection
+          # FIXED: Wait for SSH with longer timeout (up to 20 minutes)
           echo "Waiting for SSH connection to $INSTANCE_IP..."
           SSH_SUCCESS=false
           
-          for i in {1..15}; do
-            if ssh -i private_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes ubuntu@$INSTANCE_IP "echo 'SSH connection successful'" 2>/dev/null; then
+          for i in {1..40}; do
+            if timeout 30 ssh -i private_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes ubuntu@$INSTANCE_IP "echo 'SSH connection successful'" 2>/dev/null; then
               echo "✅ SSH connection established to $INSTANCE_IP!"
               SSH_SUCCESS=true
               break
             fi
-            echo "Waiting for SSH... attempt $i/15"
-            sleep 10
+            echo "Waiting for SSH... attempt $i/40"
+            sleep 30
           done
           
           if [ "$SSH_SUCCESS" = false ]; then
-            echo "❌ Failed to establish SSH connection to $INSTANCE_IP after 15 attempts"
-            echo "Skipping this instance and continuing with others..."
+            echo "❌ Failed to establish SSH connection to $INSTANCE_IP after 20 minutes"
+            echo "Checking instance status..."
+            
+            INSTANCE_ID=$(aws ec2 describe-instances \
+              --filters "Name=ip-address,Values=$INSTANCE_IP" \
+              --query 'Reservations[0].Instances[0].InstanceId' \
+              --output text 2>/dev/null || echo "unknown")
+            
+            if [ "$INSTANCE_ID" != "unknown" ] && [ "$INSTANCE_ID" != "None" ]; then
+              echo "Instance ID: $INSTANCE_ID"
+              aws ec2 describe-instance-status --instance-ids "$INSTANCE_ID" || echo "Could not get instance status"
+            fi
+            continue
+          fi
+          
+          # FIXED: Wait for LAMP stack to be ready
+          echo "Waiting for LAMP stack setup to complete on $INSTANCE_IP..."
+          LAMP_READY=false
+          
+          for attempt in {1..40}; do
+            if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "[ -f /tmp/lamp-setup-complete ]" 2>/dev/null; then
+              echo "✅ LAMP stack setup completed on $INSTANCE_IP"
+              LAMP_READY=true
+              break
+            else
+              echo "⏳ Waiting for LAMP stack setup... attempt $attempt/40"
+              sleep 30
+            fi
+          done
+          
+          if [ "$LAMP_READY" = false ]; then
+            echo "❌ LAMP stack setup did not complete on $INSTANCE_IP"
+            echo "Checking setup logs..."
+            ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
+              echo '=== User Data Log (last 50 lines) ==='
+              tail -50 /var/log/user-data.log 2>/dev/null || echo 'User data log not found'
+              echo '=== Cloud Init Output (last 30 lines) ==='
+              tail -30 /var/log/cloud-init-output.log 2>/dev/null || echo 'Cloud init log not found'
+              echo '=== Apache Status ==='
+              systemctl status apache2 --no-pager || echo 'Apache status unknown'
+            " || echo "Could not retrieve debug information"
+            continue
+          fi
+          
+          # Test basic connectivity before deploying app
+          echo "Testing basic web server on $INSTANCE_IP..."
+          if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "curl -s -f http://localhost/ > /dev/null" 2>/dev/null; then
+            echo "✅ Web server is responding on $INSTANCE_IP"
+          else
+            echo "❌ Web server is not responding on $INSTANCE_IP"
             continue
           fi
           
           # Copy application files
           echo "Deploying application files to $INSTANCE_IP..."
-          if ! scp -i private_key.pem -o StrictHostKeyChecking=no -r app/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
+          if scp -i private_key.pem -o StrictHostKeyChecking=no -r app/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
+            echo "✅ App files copied successfully"
+          else
             echo "❌ Failed to copy app files to $INSTANCE_IP"
             continue
           fi
-          echo "✅ App files copied successfully"
           
-          # Copy monitoring files only if they exist, and make it non-blocking
+          # Copy monitoring files if they exist
           if [ "$MONITORING_EXISTS" = true ]; then
             echo "Copying monitoring files to $INSTANCE_IP..."
             if scp -i private_key.pem -o StrictHostKeyChecking=no -r monitoring/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
@@ -298,59 +339,45 @@ jobs:
               MONITORING_DEPLOYED=false
             fi
           else
-            echo "⚠️ Skipping monitoring files (directory not found)"
             MONITORING_DEPLOYED=false
           fi
           
-          # Deploy and configure application with ENHANCED ERROR HANDLING
+          # FIXED: Deploy application with comprehensive error handling
           echo "Setting up web application on $INSTANCE_IP..."
           if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
-            # Wait for LAMP stack setup to complete
-            echo 'Waiting for LAMP stack installation to complete...'
-            timeout 300 bash -c 'while [ ! -f /var/log/cloud-init-output.log ] || ! grep -q \"LAMP Stack installation completed\" /var/log/cloud-init-output.log; do
-              echo \"Still waiting for LAMP stack...\"
-              sleep 15
-            done'
+            echo 'Installing application files...'
             
-            # Check if Apache is currently running
-            echo 'Checking Apache status before deployment...'
-            sudo systemctl status apache2 --no-pager || echo 'Apache not running initially'
-            
-            # Backup existing Apache configuration
-            echo 'Creating backup of current Apache setup...'
+            # Backup existing files
             sudo cp -r /var/www/html /var/www/html.backup.\$(date +%s) 2>/dev/null || echo 'No existing files to backup'
             
-            # Move the PHP/CSS files to Apache's document root
-            echo 'Moving application files...'
-            sudo cp /tmp/*.php /var/www/html/ 2>/dev/null && echo 'PHP files copied' || echo 'No PHP files to copy'
-            sudo cp /tmp/*.css /var/www/html/ 2>/dev/null && echo 'CSS files copied' || echo 'No CSS files to copy'
+            # Copy new files
+            sudo cp /tmp/*.php /var/www/html/ 2>/dev/null && echo 'PHP files copied' || echo 'No PHP files found'
+            sudo cp /tmp/*.css /var/www/html/ 2>/dev/null && echo 'CSS files copied' || echo 'No CSS files found'
             
-            # CRITICAL FIX: Set correct permissions BEFORE syntax check
-            echo 'Setting file permissions...'
+            # Set permissions
             sudo chown -R www-data:www-data /var/www/html/
             sudo chmod 755 /var/www/html/
             sudo chmod 644 /var/www/html/*.php 2>/dev/null || echo 'No PHP files to set permissions'
             sudo chmod 644 /var/www/html/*.css 2>/dev/null || echo 'No CSS files to set permissions'
             
-            # ADDED: Validate PHP syntax before proceeding
+            # Validate PHP syntax
             echo 'Validating PHP syntax...'
             PHP_SYNTAX_OK=true
             for phpfile in /var/www/html/*.php; do
               if [ -f \"\$phpfile\" ]; then
                 if ! php -l \"\$phpfile\" >/dev/null 2>&1; then
-                  echo \"❌ PHP syntax error in \$phpfile:\"
+                  echo \"❌ PHP syntax error in \$phpfile\"
                   php -l \"\$phpfile\" || true
                   PHP_SYNTAX_OK=false
                 fi
               fi
             done
             
-            if [ \"\$PHP_SYNTAX_OK\" = \"true\" ]; then
-              echo '✅ All PHP files have valid syntax'
-            else
+            if [ \"\$PHP_SYNTAX_OK\" != \"true\" ]; then
               echo '❌ PHP syntax errors found - cannot proceed with deployment'
               exit 1
             fi
+            echo '✅ All PHP files have valid syntax'
             
             # Set up monitoring only if files were successfully copied
             if [ '$MONITORING_DEPLOYED' = true ]; then
@@ -366,64 +393,32 @@ jobs:
               echo 'Skipping monitoring setup (files not available)'
             fi
             
-            # ADDED: Test Apache configuration before restart
+            # Test Apache configuration
             echo 'Testing Apache configuration...'
             if ! sudo apache2ctl configtest 2>/dev/null; then
-              echo '❌ Apache configuration test failed:'
+              echo '❌ Apache configuration test failed'
               sudo apache2ctl configtest 2>&1 || true
-              echo 'This usually indicates a PHP or module configuration issue.'
               exit 1
             fi
             echo '✅ Apache configuration is valid'
             
-            # Restart Apache with better error handling
+            # Restart Apache
             echo 'Restarting Apache...'
             if sudo systemctl restart apache2; then
               echo '✅ Apache restarted successfully'
             else
-              echo '❌ Apache restart failed - checking logs...'
+              echo '❌ Apache restart failed'
               sudo systemctl status apache2 --no-pager || true
-              echo '--- Last 20 lines of Apache error log ---'
-              sudo tail -20 /var/log/apache2/error.log || true
-              echo '--- Checking for Apache processes ---'
-              ps aux | grep apache2 || true
-              
-              # Try to start Apache manually for better error output
-              echo 'Attempting manual Apache start...'
-              sudo apache2ctl start 2>&1 || true
               exit 1
             fi
             
-            # Wait a moment for Apache to fully start
             sleep 5
             
-            # ENHANCED: Multiple health checks
-            echo 'Testing web server health...'
-            
-            # Test 1: Check if Apache process is running
-            if pgrep apache2 > /dev/null; then
-              echo '✅ Apache processes are running'
-            else
-              echo '❌ Apache processes not found'
-              ps aux | grep apache2 || true
-              exit 1
-            fi
-            
-            # Test 2: Check if Apache is listening on port 80
-            if netstat -tlnp | grep ':80 ' > /dev/null; then
-              echo '✅ Apache is listening on port 80'
-            else
-              echo '❌ Apache is not listening on port 80'
-              echo 'Checking what is listening:'
-              sudo netstat -tlnp | grep ':80' || echo 'Nothing listening on port 80'
-              exit 1
-            fi
-            
-            # Test 3: Test local HTTP connectivity with retries
-            echo 'Testing local HTTP connectivity...'
+            # Test final connectivity
+            echo 'Testing final connectivity...'
             HTTP_SUCCESS=false
             for attempt in {1..10}; do
-              if curl -s -m 5 http://localhost/ > /dev/null; then
+              if curl -s -f http://localhost/ > /dev/null; then
                 echo \"✅ Local HTTP test passed (attempt \$attempt)\"
                 HTTP_SUCCESS=true
                 break
@@ -434,82 +429,27 @@ jobs:
             done
             
             if [ \"\$HTTP_SUCCESS\" != \"true\" ]; then
-              echo '❌ Local HTTP connectivity failed after 10 attempts'
-              
-              # Debug information
+              echo '❌ Application is not responding after deployment'
               echo '=== DEBUGGING INFORMATION ==='
-              echo '--- Apache Status ---'
               sudo systemctl status apache2 --no-pager || true
-              echo '--- Apache Error Log (last 30 lines) ---'
-              sudo tail -30 /var/log/apache2/error.log || true
-              echo '--- Apache Access Log (last 10 lines) ---'
-              sudo tail -10 /var/log/apache2/access.log || true
+              echo '--- Apache Error Log (last 20 lines) ---'
+              sudo tail -20 /var/log/apache2/error.log || true
               echo '--- Files in /var/www/html ---'
               ls -la /var/www/html/ || true
-              echo '--- Apache Configuration Test ---'
-              sudo apache2ctl configtest || true
-              echo '--- Network Connections ---'
-              sudo netstat -tlnp || true
-              
               exit 1
             fi
             
-            # Test 4: Test health.php specifically
-            if curl -s -m 5 http://localhost/health.php | grep -q 'healthy\\|status' 2>/dev/null; then
-              echo '✅ Health check endpoint working'
-            else
-              echo '⚠️ Health check endpoint not working, testing index.php...'
-              if curl -s -m 5 http://localhost/index.php > /dev/null; then
-                echo '✅ Index page working'
-              else
-                echo '❌ Index page also not working'
-                echo 'Raw response from localhost:'
-                curl -v -m 10 http://localhost/ 2>&1 || true
-                exit 1
-              fi
-            fi
-            
-            # Confirm files are in place
-            echo \"✅ Application deployment completed successfully on $INSTANCE_IP!\"
-            echo \"Files in /var/www/html/:\"
-            ls -la /var/www/html/
-            
-            echo '=== FINAL STATUS CHECK ==='
-            sudo systemctl is-active apache2 && echo 'Apache is active' || echo 'Apache is not active'
-            ps aux | grep apache2 | grep -v grep | wc -l | xargs echo 'Apache processes:'
-            
+            echo '✅ Application deployment successful'
           "; then
             echo "✅ Successfully deployed to $INSTANCE_IP"
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
           else
             echo "❌ Deployment failed on $INSTANCE_IP"
-            
-            # Get debug information on failure
-            echo "=== DEBUGGING FAILED DEPLOYMENT ==="
-            ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
-              echo 'Apache status:'
-              sudo systemctl status apache2 --no-pager || true
-              echo 'Apache error log (last 20 lines):'
-              sudo tail -20 /var/log/apache2/error.log || true
-              echo 'Files in /var/www/html:'
-              ls -la /var/www/html/ || true
-              echo 'PHP syntax check:'
-              for phpfile in /var/www/html/*.php; do
-                if [ -f \"\$phpfile\" ]; then
-                  echo \"Checking \$phpfile:\"
-                  php -l \"\$phpfile\" || true
-                fi
-              done
-            " || echo "Could not retrieve debug information"
           fi
-          
-          echo "Finished deployment attempt to $INSTANCE_IP"
         done
         
-        # Clean up local PEM file
         rm -f private_key.pem
         
-        # Final deployment summary
         echo "===================="
         echo "DEPLOYMENT SUMMARY"
         echo "===================="
@@ -520,9 +460,6 @@ jobs:
         if [ $SUCCESS_COUNT -gt 0 ]; then
           echo "🎉 Application deployed successfully to $SUCCESS_COUNT instance(s)!"
           echo "🌐 Access your load-balanced application at: http://$LOAD_BALANCER_DNS"
-          if [ "$MONITORING_EXISTS" = false ]; then
-            echo "⚠️ Note: Monitoring setup was skipped due to missing files"
-          fi
         else
           echo "❌ All deployments failed!"
           exit 1
@@ -547,11 +484,11 @@ jobs:
         LOAD_BALANCER_DNS: ${{ needs.terraform.outputs.load_balancer_dns }}
       run: |
         echo "Waiting for load balancer health checks to pass..."
-        sleep 180
+        sleep 300  # FIXED: Increased wait time to 5 minutes
         
         # Test load balancer endpoint with more attempts
-        for i in {1..15}; do
-          echo "Testing load balancer... attempt $i/15"
+        for i in {1..20}; do
+          echo "Testing load balancer... attempt $i/20"
           if curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/health.php" > /dev/null; then
             echo "✅ Load balancer health check passed!"
             echo "🌐 Application is healthy at: http://$LOAD_BALANCER_DNS"
@@ -561,12 +498,11 @@ jobs:
             echo "🌐 Application is accessible at: http://$LOAD_BALANCER_DNS"
             break
           else
-            echo "⏳ Waiting for health check... attempt $i/15"
-            if [ $i -eq 15 ]; then
-              echo "❌ Health check failed after 15 attempts"
+            echo "⏳ Waiting for health check... attempt $i/20"
+            if [ $i -eq 20 ]; then
+              echo "❌ Health check failed after 20 attempts"
               echo "🔍 Let's check what's available..."
               
-              # Try to get more information about the failure
               echo "Load balancer DNS: $LOAD_BALANCER_DNS"
               
               # Test basic connectivity
@@ -583,7 +519,7 @@ jobs:
               echo "⚠️ Application may be accessible but health checks are failing"
               echo "🌐 Try accessing: http://$LOAD_BALANCER_DNS"
             else
-              sleep 30
+              sleep 60  # FIXED: Increased sleep between attempts
             fi
           fi
         done

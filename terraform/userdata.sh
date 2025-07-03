@@ -1,55 +1,125 @@
 #!/bin/bash
-# EC2 User Data Script for Proxy LAMP Stack with Load Balancer, RDS, and Monitoring
+# FIXED EC2 User Data Script for Proxy LAMP Stack with Load Balancer, RDS, and Monitoring
+
+set -e  # Exit on any error
+exec > >(tee /var/log/user-data.log) 2>&1  # Log all output
+
+echo "=== STARTING LAMP STACK SETUP $(date) ==="
 
 #-------------------------------
 # 1. Update and Upgrade Packages
 #-------------------------------
-apt-get update -y         # Fetches the list of available updates
-apt-get upgrade -y        # Installs the latest versions of all packages
+echo "Updating packages..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get upgrade -y
 
 #-------------------------------
 # 2. Install Apache Web Server
 #-------------------------------
-apt-get install -y apache2  # Installs the Apache2 HTTP server
+echo "Installing Apache..."
+apt-get install -y apache2
 
 #-------------------------------
 # 3. Install PHP and Extensions
 #-------------------------------
+echo "Installing PHP..."
 apt-get install -y php php-mysql libapache2-mod-php php-cli php-common php-mbstring php-xml php-curl php-json php-zip
-# Installs PHP, the MySQL driver, Apache PHP module, and common PHP extensions
 
 #-------------------------------
-# 4. Install MySQL Client (for RDS connection)
+# 4. Install MySQL Client
 #-------------------------------
+echo "Installing MySQL client..."
 apt-get install -y mysql-client-core-8.0
-# MySQL client to connect to RDS database
 
 #-------------------------------
 # 5. Install AWS CLI and CloudWatch Agent
 #-------------------------------
-apt-get install -y awscli   # Installs AWS CLI
+echo "Installing AWS tools..."
+apt-get install -y awscli htop iotop nethogs curl jq
 wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
 dpkg -i amazon-cloudwatch-agent.deb
 
 #-------------------------------
-# 6. Install Additional Monitoring Tools
+# 6. Enable and Start Apache IMMEDIATELY
 #-------------------------------
-apt-get install -y htop iotop nethogs curl jq
-# Performance monitoring and debugging tools
+echo "Starting Apache..."
+systemctl enable apache2
+systemctl start apache2
+
+# Wait for Apache to fully start
+sleep 5
+
+# Verify Apache is running
+if ! systemctl is-active --quiet apache2; then
+    echo "ERROR: Apache failed to start"
+    systemctl status apache2
+    exit 1
+fi
+
+echo "Apache is running successfully"
 
 #-------------------------------
-# 7. Enable and Start Services
+# 7. Create Basic Index Page IMMEDIATELY
 #-------------------------------
-systemctl start apache2     # Starts Apache service
-systemctl enable apache2    # Ensures Apache starts on boot
+echo "Creating basic index page..."
+cat > /var/www/html/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LAMP Stack Loading...</title>
+    <meta http-equiv="refresh" content="30">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .status { color: #27ae60; font-weight: bold; }
+        .loading { color: #f39c12; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 LAMP Stack Loading...</h1>
+        <p class="status">✅ Apache: Running</p>
+        <p class="loading">⏳ PHP: Installing...</p>
+        <p class="loading">⏳ Database: Connecting...</p>
+        <p class="loading">⏳ Application: Loading...</p>
+        <hr>
+        <p><strong>Server:</strong> HOSTNAME_PLACEHOLDER</p>
+        <p><strong>Time:</strong> TIME_PLACEHOLDER</p>
+        <p><strong>Status:</strong> Initializing...</p>
+        <hr>
+        <p>Please wait while the application loads. This page will refresh automatically.</p>
+    </div>
+</body>
+</html>
+EOF
+
+# Replace placeholders in the HTML
+sed -i "s/HOSTNAME_PLACEHOLDER/$(hostname)/g" /var/www/html/index.html
+sed -i "s/TIME_PLACEHOLDER/$(date)/g" /var/www/html/index.html
+
+# Set permissions
+chown -R www-data:www-data /var/www/html
+chmod -R 755 /var/www/html
+
+echo "Basic index page created and accessible"
 
 #-------------------------------
-# 8. Configure Apache for Load Balancer
+# 8. Test Basic Apache Functionality
 #-------------------------------
-# Enable necessary Apache modules
-a2enmod rewrite           # Enables mod_rewrite module for clean URLs
-a2enmod headers           # Enables mod_headers for load balancer support
-a2enmod ssl               # Enables SSL module for future HTTPS support
+echo "Testing Apache..."
+if curl -s -f http://localhost/ > /dev/null; then
+    echo "✅ Apache is responding to HTTP requests"
+else
+    echo "❌ Apache is not responding"
+    exit 1
+fi
+
+#-------------------------------
+# 9. Configure Apache for Load Balancer
+#-------------------------------
+echo "Configuring Apache for load balancer..."
+a2enmod rewrite headers ssl
 
 # Configure Apache to work behind load balancer
 cat > /etc/apache2/conf-available/load-balancer.conf << 'EOF'
@@ -61,7 +131,6 @@ RemoteIPInternalProxy 10.0.0.0/16
 Header always set X-Content-Type-Options nosniff
 Header always set X-Frame-Options DENY
 Header always set X-XSS-Protection "1; mode=block"
-Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 
 # Health check endpoint optimization
 <Location "/health.php">
@@ -71,26 +140,15 @@ Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains
 EOF
 
 a2enconf load-balancer
-systemctl restart apache2 # Restarts Apache to apply changes
+systemctl restart apache2
+
+# Wait for Apache restart
+sleep 5
 
 #-------------------------------
-# 9. Set File Permissions
+# 10. Create Health Check Endpoint EARLY
 #-------------------------------
-chown -R www-data:www-data /var/www/html  # Changes ownership to Apache user
-chmod -R 755 /var/www/html                # Grants read & execute permissions
-
-#-------------------------------
-# 10. Clean Up Default Page
-#-------------------------------
-rm -f /var/www/html/index.html  # Removes Apache default welcome page
-
-#-------------------------------
-# 11. Create App Directory and Basic Health Check
-#-------------------------------
-mkdir -p /var/www/html/app             # Creates app folder
-chown -R www-data:www-data /var/www/html/app  # Sets proper ownership
-
-# Create temporary health check until app deployment
+echo "Creating health check endpoint..."
 cat > /var/www/html/health.php << 'EOF'
 <?php
 header('Content-Type: application/json');
@@ -106,106 +164,197 @@ echo json_encode([
 ?>
 EOF
 
+chown www-data:www-data /var/www/html/health.php
+chmod 644 /var/www/html/health.php
+
+# Test health endpoint
+echo "Testing health endpoint..."
+if curl -s http://localhost/health.php | grep -q "healthy"; then
+    echo "✅ Health endpoint is working"
+else
+    echo "❌ Health endpoint is not working"
+fi
+
 #-------------------------------
-# 12. Configure Database Connection
+# 11. Configure Database Connection
 #-------------------------------
-# Get database endpoint from EC2 user data or instance tags
-INSTANCE_ID=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-REGION=$$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+echo "Configuring database connection..."
+
+# Get instance metadata
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "eu-central-1")
+
+echo "Instance ID: $INSTANCE_ID"
+echo "Region: $REGION"
 
 # Function to get tag value
 get_tag_value() {
-    local tag_key="$$1"
+    local tag_key="$1"
     aws ec2 describe-tags \
-        --region "$$REGION" \
-        --filters "Name=resource-id,Values=$$INSTANCE_ID" "Name=key,Values=$$tag_key" \
+        --region "$REGION" \
+        --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=$tag_key" \
         --query 'Tags[0].Value' \
         --output text 2>/dev/null || echo ""
 }
 
-# Try to get database info from tags (set by Terraform)
-DB_ENDPOINT=$$(get_tag_value "DatabaseEndpoint")
-DB_PASSWORD_TAG=$$(get_tag_value "DatabasePassword")
+# Try to get database info from tags
+DB_ENDPOINT=$(get_tag_value "DatabaseEndpoint")
+DB_PASSWORD_TAG=$(get_tag_value "DatabasePassword")
 
-# If not found in tags, try other methods
-if [ -z "$$DB_ENDPOINT" ]; then
-    # Try to get from Auto Scaling Group tags
-    ASG_NAME=$$(aws autoscaling describe-auto-scaling-instances \
-        --region "$$REGION" \
-        --instance-ids "$$INSTANCE_ID" \
+echo "DB_ENDPOINT from tags: $DB_ENDPOINT"
+
+# If not found in tags, try Auto Scaling Group tags
+if [ -z "$DB_ENDPOINT" ]; then
+    ASG_NAME=$(aws autoscaling describe-auto-scaling-instances \
+        --region "$REGION" \
+        --instance-ids "$INSTANCE_ID" \
         --query 'AutoScalingInstances[0].AutoScalingGroupName' \
         --output text 2>/dev/null || echo "")
     
-    if [ -n "$$ASG_NAME" ]; then
-        DB_ENDPOINT=$$(aws autoscaling describe-tags \
-            --region "$$REGION" \
-            --filters "Name=auto-scaling-group,Values=$$ASG_NAME" "Name=key,Values=DatabaseEndpoint" \
+    if [ -n "$ASG_NAME" ]; then
+        DB_ENDPOINT=$(aws autoscaling describe-tags \
+            --region "$REGION" \
+            --filters "Name=auto-scaling-group,Values=$ASG_NAME" "Name=key,Values=DatabaseEndpoint" \
             --query 'Tags[0].Value' \
             --output text 2>/dev/null || echo "")
         
-        DB_PASSWORD_TAG=$$(aws autoscaling describe-tags \
-            --region "$$REGION" \
-            --filters "Name=auto-scaling-group,Values=$$ASG_NAME" "Name=key,Values=DatabasePassword" \
+        DB_PASSWORD_TAG=$(aws autoscaling describe-tags \
+            --region "$REGION" \
+            --filters "Name=auto-scaling-group,Values=$ASG_NAME" "Name=key,Values=DatabasePassword" \
             --query 'Tags[0].Value' \
             --output text 2>/dev/null || echo "")
     fi
 fi
 
-# Use template variables if available, otherwise use discovered values
+# Use template variables as fallback
 DB_ENDPOINT_FINAL="${db_endpoint}"
 DB_PASSWORD_FINAL="${db_password}"
 
-# If template variables are empty, try to get from instance tags
-if [ -z "$$DB_ENDPOINT_FINAL" ] || [ "$$DB_ENDPOINT_FINAL" = "proxy-lamp-mysql-endpoint" ]; then
-    DB_ENDPOINT_FINAL="$$DB_ENDPOINT"
+# If template variables are placeholder values, use tag values
+if [ -z "$DB_ENDPOINT_FINAL" ] || [ "$DB_ENDPOINT_FINAL" = "proxy-lamp-mysql-endpoint" ]; then
+    DB_ENDPOINT_FINAL="$DB_ENDPOINT"
 fi
 
-if [ -z "$$DB_PASSWORD_FINAL" ] || [ "$$DB_PASSWORD_FINAL" = "ProxySecurePass123!" ]; then
-    DB_PASSWORD_FINAL="$$DB_PASSWORD_TAG"
+if [ -z "$DB_PASSWORD_FINAL" ] || [ "$DB_PASSWORD_FINAL" = "ProxySecurePass123!" ]; then
+    DB_PASSWORD_FINAL="$DB_PASSWORD_TAG"
 fi
 
-# Final fallback values
+# Final fallback values (FIXED: Properly escaped for Terraform)
 DB_ENDPOINT_FINAL="$${DB_ENDPOINT_FINAL:-proxy-lamp-mysql-endpoint}"
 DB_PASSWORD_FINAL="$${DB_PASSWORD_FINAL:-ProxySecurePass123!}"
 
-# Create database configuration file for PHP
+echo "Final DB endpoint: $DB_ENDPOINT_FINAL"
+
+# Create database configuration file
 cat > /var/www/html/.db_config << EOF
-DB_HOST=$$DB_ENDPOINT_FINAL
+DB_HOST=$DB_ENDPOINT_FINAL
 DB_USER=admin
-DB_PASSWORD=$$DB_PASSWORD_FINAL
+DB_PASSWORD=$DB_PASSWORD_FINAL
 DB_NAME=proxylamptodoapp
 DB_PORT=3306
 EOF
 
-# Set proper permissions for config file
 chown www-data:www-data /var/www/html/.db_config
 chmod 600 /var/www/html/.db_config
 
-# Also set as environment variables for this session
-export DB_HOST="$$DB_ENDPOINT_FINAL"
+# Also set as environment variables
+export DB_HOST="$DB_ENDPOINT_FINAL"
 export DB_USER="admin"
-export DB_PASSWORD="$$DB_PASSWORD_FINAL"
+export DB_PASSWORD="$DB_PASSWORD_FINAL"
 export DB_NAME="proxylamptodoapp"
 export DB_PORT="3306"
 
 # Add to Apache environment
 cat >> /etc/apache2/envvars << EOF
-export DB_HOST="$$DB_ENDPOINT_FINAL"
+export DB_HOST="$DB_ENDPOINT_FINAL"
 export DB_USER="admin"
-export DB_PASSWORD="$$DB_PASSWORD_FINAL"
+export DB_PASSWORD="$DB_PASSWORD_FINAL"
 export DB_NAME="proxylamptodoapp"
 export DB_PORT="3306"
 EOF
 
-echo "Database configuration set - Host: $$DB_ENDPOINT_FINAL"
+#-------------------------------
+# 12. Wait for Database and Test Connection
+#-------------------------------
+if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "proxy-lamp-mysql-endpoint" ]; then
+    echo "Testing database connection..."
+    
+    # Wait for database to be available (up to 10 minutes)
+    for i in {1..60}; do
+        if mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" -e "SELECT 1;" >/dev/null 2>&1; then
+            echo "✅ Database connection successful!"
+            
+            # Create database and table if they don't exist
+            mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" << 'MYSQL_EOF'
+CREATE DATABASE IF NOT EXISTS proxylamptodoapp;
+USE proxylamptodoapp;
+CREATE TABLE IF NOT EXISTS tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status ENUM('pending', 'completed') DEFAULT 'pending',
+    INDEX idx_created_at (created_at),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+MYSQL_EOF
+            
+            echo "✅ Database and table setup completed"
+            break
+        else
+            echo "Waiting for database... attempt $i/60"
+            sleep 10
+        fi
+    done
+else
+    echo "⚠️ Database endpoint not configured, will be set during deployment"
+fi
 
 #-------------------------------
-# 13. Configure CloudWatch Agent
+# 13. Update Status Page
 #-------------------------------
-# Create CloudWatch agent configuration directory
+echo "Updating status page..."
+cat > /var/www/html/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LAMP Stack Ready</title>
+    <meta http-equiv="refresh" content="60">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .status { color: #27ae60; font-weight: bold; }
+        .loading { color: #f39c12; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 LAMP Stack Status</h1>
+        <p class="status">✅ Apache: Running</p>
+        <p class="status">✅ PHP: Running</p>
+        <p class="loading">⏳ Application: Loading...</p>
+        <hr>
+        <p><strong>Server:</strong> HOSTNAME_PLACEHOLDER</p>
+        <p><strong>Time:</strong> TIME_PLACEHOLDER</p>
+        <p><strong>Status:</strong> Ready for application deployment</p>
+        <hr>
+        <p><a href="/health.php">Health Check</a></p>
+        <p>The system is ready. Application files will be deployed shortly.</p>
+    </div>
+</body>
+</html>
+EOF
+
+sed -i "s/HOSTNAME_PLACEHOLDER/$(hostname)/g" /var/www/html/index.html
+sed -i "s/TIME_PLACEHOLDER/$(date)/g" /var/www/html/index.html
+
+#-------------------------------
+# 14. Configure CloudWatch Agent
+#-------------------------------
+echo "Configuring CloudWatch agent..."
 mkdir -p /opt/aws/amazon-cloudwatch-agent/etc/
 
-# Basic CloudWatch agent configuration (will be replaced by deployment)
+# Basic CloudWatch agent configuration
 cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
 {
     "metrics": {
@@ -221,21 +370,12 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
                 "metrics_collection_interval": 60,
                 "resources": ["*"]
             },
-            "diskio": {
-                "measurement": ["io_time", "read_bytes", "write_bytes", "reads", "writes"],
-                "metrics_collection_interval": 60,
-                "resources": ["*"]
-            },
             "mem": {
                 "measurement": ["mem_used_percent"],
                 "metrics_collection_interval": 60
             },
             "netstat": {
                 "measurement": ["tcp_established", "tcp_time_wait"],
-                "metrics_collection_interval": 60
-            },
-            "processes": {
-                "measurement": ["running", "sleeping", "dead"],
                 "metrics_collection_interval": 60
             }
         }
@@ -267,29 +407,29 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
 EOF
 
 #-------------------------------
-# 14. Create Custom Metrics Script
+# 15. Create Custom Metrics Script
 #-------------------------------
 cat > /usr/local/bin/custom-metrics.sh << 'EOF'
 #!/bin/bash
 # Custom metrics for CloudWatch
 
-INSTANCE_ID=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-REGION=$$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
 
 # Apache connection metrics
-APACHE_CONNECTIONS=$$(netstat -an | grep :80 | grep ESTABLISHED | wc -l)
-aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=ApacheConnections,Value=$$APACHE_CONNECTIONS,Unit=Count,Dimensions=InstanceId=$$INSTANCE_ID
+APACHE_CONNECTIONS=$(netstat -an | grep :80 | grep ESTABLISHED | wc -l)
+aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=ApacheConnections,Value=$APACHE_CONNECTIONS,Unit=Count,Dimensions=InstanceId=$INSTANCE_ID
 
 # Disk usage metrics
-DISK_USAGE=$$(df /var/www | tail -1 | awk '{print $$5}' | sed 's/%//')
-aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=DiskUsagePercent,Value=$$DISK_USAGE,Unit=Percent,Dimensions=InstanceId=$$INSTANCE_ID
+DISK_USAGE=$(df /var/www | tail -1 | awk '{print $5}' | sed 's/%//')
+aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=DiskUsagePercent,Value=$DISK_USAGE,Unit=Percent,Dimensions=InstanceId=$INSTANCE_ID
 
 # Memory usage metrics
-MEMORY_USAGE=$$(free | grep Mem | awk '{printf("%.1f"), $$3/$$2 * 100.0}')
-aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=MemoryUsagePercent,Value=$$MEMORY_USAGE,Unit=Percent,Dimensions=InstanceId=$$INSTANCE_ID
+MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.1f"), $3/$2 * 100.0}')
+aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=MemoryUsagePercent,Value=$MEMORY_USAGE,Unit=Percent,Dimensions=InstanceId=$INSTANCE_ID
 
 # Apache status check
 if systemctl is-active --quiet apache2; then
@@ -297,33 +437,17 @@ if systemctl is-active --quiet apache2; then
 else
     APACHE_STATUS=0
 fi
-aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=ApacheStatus,Value=$$APACHE_STATUS,Unit=Count,Dimensions=InstanceId=$$INSTANCE_ID
+aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=ApacheStatus,Value=$APACHE_STATUS,Unit=Count,Dimensions=InstanceId=$INSTANCE_ID
 EOF
 
 chmod +x /usr/local/bin/custom-metrics.sh
 
 #-------------------------------
-# 15. Configure Log Rotation
+# 16. Configure System Tuning and Security
 #-------------------------------
-cat > /etc/logrotate.d/proxy-lamp << 'EOF'
-/var/log/apache2/*.log {
-    daily
-    missingok
-    rotate 52
-    compress
-    delaycompress
-    notifempty
-    create 644 root adm
-    postrotate
-        systemctl reload apache2
-    endscript
-}
-EOF
+echo "Configuring system tuning..."
 
-#-------------------------------
-# 16. Set up System Tuning for Load Balancer
-#-------------------------------
 # Optimize kernel parameters for web server performance
 cat >> /etc/sysctl.conf << 'EOF'
 # Network performance tuning for load balanced web server
@@ -338,9 +462,7 @@ EOF
 
 sysctl -p
 
-#-------------------------------
-# 17. Install and Configure Fail2Ban for Security
-#-------------------------------
+# Install and configure Fail2Ban for security
 apt-get install -y fail2ban
 
 cat > /etc/fail2ban/jail.local << 'EOF'
@@ -369,19 +491,31 @@ systemctl enable fail2ban
 systemctl start fail2ban
 
 #-------------------------------
-# 18. Create Application Deployment Directory
+# 17. Configure Log Rotation
 #-------------------------------
-mkdir -p /tmp/app-deployment
-chown ubuntu:ubuntu /tmp/app-deployment
+cat > /etc/logrotate.d/proxy-lamp << 'EOF'
+/var/log/apache2/*.log {
+    daily
+    missingok
+    rotate 52
+    compress
+    delaycompress
+    notifempty
+    create 644 root adm
+    postrotate
+        systemctl reload apache2
+    endscript
+}
+EOF
 
 #-------------------------------
-# 19. Final Setup and Verification
+# 18. Enable Apache Status Module
 #-------------------------------
-# Enable Apache status module for monitoring
+echo "Enabling Apache status module..."
 a2enmod status
 echo "ExtendedStatus On" >> /etc/apache2/apache2.conf
 
-# Configure Apache server-status for monitoring (restricted to localhost)
+# Configure Apache server-status for monitoring
 cat > /etc/apache2/conf-available/server-status.conf << 'EOF'
 <Location "/server-status">
     SetHandler server-status
@@ -390,56 +524,70 @@ cat > /etc/apache2/conf-available/server-status.conf << 'EOF'
 EOF
 a2enconf server-status
 
-# Restart services
+# Restart Apache
 systemctl restart apache2
-
-# Verify services are running
-systemctl is-active apache2 && echo "Apache is running" || echo "Apache failed to start"
+sleep 5
 
 #-------------------------------
-# 20. Wait for Network Connectivity and Start CloudWatch Agent
+# 19. Start CloudWatch Agent
 #-------------------------------
-# Wait for network connectivity before starting CloudWatch agent
-sleep 30
+echo "Starting CloudWatch agent..."
+sleep 30  # Wait for network connectivity
 
-# Start CloudWatch agent with basic configuration
 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
     -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
 
 systemctl enable amazon-cloudwatch-agent
 
 #-------------------------------
-# 21. Test Database Connection
+# 20. Final Health Checks
 #-------------------------------
-# Test database connection and create a simple test
-echo "Testing database connection..."
-if [ -n "$$DB_ENDPOINT_FINAL" ] && [ "$$DB_ENDPOINT_FINAL" != "proxy-lamp-mysql-endpoint" ]; then
-    # Wait for database to be available
-    for i in {1..30}; do
-        if mysql -h "$$DB_ENDPOINT_FINAL" -u admin -p"$${DB_PASSWORD_FINAL}" -e "SELECT 1;" 2>/dev/null; then
-            echo "Database connection successful!"
-            break
-        else
-            echo "Waiting for database... attempt $$i/30"
-            sleep 10
-        fi
-    done
+echo "Performing final health checks..."
+
+# Test Apache
+if systemctl is-active --quiet apache2; then
+    echo "✅ Apache is running"
 else
-    echo "Database endpoint not configured, will be set during deployment"
+    echo "❌ Apache is not running"
+    systemctl status apache2
+    exit 1
+fi
+
+# Test HTTP connectivity
+if curl -s -f http://localhost/ > /dev/null; then
+    echo "✅ HTTP connectivity working"
+else
+    echo "❌ HTTP connectivity failed"
+    exit 1
+fi
+
+# Test health endpoint
+if curl -s http://localhost/health.php | grep -q "healthy"; then
+    echo "✅ Health endpoint working"
+else
+    echo "❌ Health endpoint failed"
 fi
 
 #-------------------------------
-# 22. Completion Marker
+# 21. Create Application Deployment Directory
+#-------------------------------
+mkdir -p /tmp/app-deployment
+chown ubuntu:ubuntu /tmp/app-deployment
+
+#-------------------------------
+# 22. Signal Completion
 #-------------------------------
 echo "LAMP Stack installation completed!" >> /var/log/cloud-init-output.log
-echo "$$(date): Proxy LAMP Stack setup completed" >> /var/log/setup.log
+echo "$(date): LAMP Stack setup completed successfully" >> /var/log/setup.log
 
-# Final system status
-echo "=== System Status ===" >> /var/log/setup.log
-systemctl status apache2 --no-pager >> /var/log/setup.log
-systemctl status amazon-cloudwatch-agent --no-pager >> /var/log/setup.log
-
-# Create marker file for deployment script
+# Create completion marker
 touch /tmp/lamp-setup-complete
 
-echo "Proxy LAMP Stack installation completed successfully!"
+echo "=== LAMP STACK SETUP COMPLETED SUCCESSFULLY $(date) ==="
+
+# Final status
+systemctl status apache2 --no-pager
+ps aux | grep apache2 | grep -v grep | wc -l | xargs echo 'Apache processes:'
+curl -s http://localhost/health.php | jq . || echo "Health check response available"
+
+exit 0
