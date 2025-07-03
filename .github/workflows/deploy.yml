@@ -2,7 +2,7 @@
 
 name: Deploy Proxy LAMP Stack with Load Balancer
 
-# THIS WAS MISSING - Event triggers
+# Event triggers
 on:
   push:
     branches: [ main ]
@@ -103,7 +103,7 @@ jobs:
       run: |
         echo "Getting instance IPs from Auto Scaling Group: $ASG_NAME"
         
-        # FIXED: Get ALL instances, not just InService ones
+        # Get ALL instances, not just InService ones
         echo "=== All instances in ASG ==="
         aws autoscaling describe-auto-scaling-groups \
           --auto-scaling-group-names "$ASG_NAME" \
@@ -147,29 +147,47 @@ jobs:
           exit 1
         fi
         
-        # Get public IP addresses for running instances
+        # Get public IP addresses for running instances - FIXED: Proper formatting
         echo "=== Getting IP addresses for running instances ==="
-        INSTANCE_IPS=$(aws ec2 describe-instances \
+        INSTANCE_IPS_RAW=$(aws ec2 describe-instances \
           --instance-ids $RUNNING_INSTANCES \
           --query 'Reservations[].Instances[?State.Name==`running`].PublicIpAddress' \
-          --output text | tr '\t' ' ')
+          --output text)
         
-        echo "Public IPs: $INSTANCE_IPS"
+        # FIXED: Convert newlines and tabs to spaces, remove empty entries
+        INSTANCE_IPS=$(echo "$INSTANCE_IPS_RAW" | tr '\n\t' ' ' | tr -s ' ' | xargs)
+        
+        echo "Public IPs (raw): $INSTANCE_IPS_RAW"
+        echo "Public IPs (formatted): $INSTANCE_IPS"
         
         # If no public IPs, try private IPs
         if [ -z "$INSTANCE_IPS" ] || [ "$INSTANCE_IPS" = "None" ]; then
           echo "No public IPs found, trying private IPs..."
-          INSTANCE_IPS=$(aws ec2 describe-instances \
+          INSTANCE_IPS_RAW=$(aws ec2 describe-instances \
             --instance-ids $RUNNING_INSTANCES \
             --query 'Reservations[].Instances[?State.Name==`running`].PrivateIpAddress' \
-            --output text | tr '\t' ' ')
-          echo "Private IPs: $INSTANCE_IPS"
+            --output text)
+          
+          # FIXED: Same formatting for private IPs
+          INSTANCE_IPS=$(echo "$INSTANCE_IPS_RAW" | tr '\n\t' ' ' | tr -s ' ' | xargs)
+          echo "Private IPs (formatted): $INSTANCE_IPS"
         fi
         
         if [ -z "$INSTANCE_IPS" ]; then
           echo "❌ No IP addresses found for running instances!"
           exit 1
         fi
+        
+        # FIXED: Validate IP format before storing
+        echo "Validating IP addresses..."
+        for IP in $INSTANCE_IPS; do
+          if [[ $IP =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            echo "✅ Valid IP: $IP"
+          else
+            echo "❌ Invalid IP format: $IP"
+            exit 1
+          fi
+        done
         
         # Store IPs in environment for next step
         echo "INSTANCE_IPS=$INSTANCE_IPS" >> $GITHUB_ENV
@@ -186,6 +204,16 @@ jobs:
         
         echo "Instance IPs to deploy to: $INSTANCE_IPS"
         
+        # FIXED: Validate that INSTANCE_IPS is properly formatted
+        if [ -z "$INSTANCE_IPS" ]; then
+          echo "❌ No instance IPs available for deployment"
+          exit 1
+        fi
+        
+        # FIXED: Check IP count
+        IP_COUNT=$(echo $INSTANCE_IPS | wc -w)
+        echo "Number of IPs to deploy to: $IP_COUNT"
+        
         SUCCESS_COUNT=0
         TOTAL_COUNT=0
         
@@ -200,6 +228,12 @@ jobs:
           # Skip if IP is empty or "None"
           if [ -z "$INSTANCE_IP" ] || [ "$INSTANCE_IP" = "None" ]; then
             echo "Skipping empty or invalid IP: $INSTANCE_IP"
+            continue
+          fi
+          
+          # FIXED: Additional IP validation
+          if ! [[ $INSTANCE_IP =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            echo "❌ Invalid IP format: $INSTANCE_IP - skipping"
             continue
           fi
           
