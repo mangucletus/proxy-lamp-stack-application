@@ -1,3 +1,5 @@
+# terraform/modules/database/variables.tf - FIXED VERSION
+
 variable "vpc_id" {
   description = "ID of the VPC"
   type        = string
@@ -53,7 +55,7 @@ variable "db_max_allocated_storage" {
 variable "db_storage_type" {
   description = "Storage type for RDS instance"
   type        = string
-  default     = "gp3"
+  default     = "gp2"  # Changed from gp3 for compatibility
 }
 
 # Database configuration
@@ -101,31 +103,9 @@ variable "db_maintenance_window" {
   default     = "sun:04:00-sun:05:00"
 }
 
-# High availability configuration
-variable "db_multi_az" {
-  description = "Enable Multi-AZ deployment for RDS"
-  type        = bool
-  default     = false
-}
+# High availability configuration - REMOVED multi_az (not supported by t3.micro)
 
-# Monitoring configuration
-variable "enable_enhanced_monitoring" {
-  description = "Enable enhanced monitoring for RDS"
-  type        = bool
-  default     = true
-}
-
-variable "enable_performance_insights" {
-  description = "Enable Performance Insights for RDS"
-  type        = bool
-  default     = true
-}
-
-variable "log_retention_days" {
-  description = "Retention period for RDS logs in days"
-  type        = number
-  default     = 7
-}
+# Monitoring configuration - REMOVED enhanced monitoring and performance insights
 
 # Security configuration
 variable "enable_deletion_protection" {
@@ -151,50 +131,4 @@ variable "apply_immediately" {
   description = "Apply changes immediately or during maintenance window"
   type        = bool
   default     = false
-}
-
-# Read replica configuration
-variable "create_read_replica" {
-  description = "Create a read replica for the database"
-  type        = bool
-  default     = false
-}
-
-variable "replica_instance_class" {
-  description = "Instance class for read replica"
-  type        = string
-  default     = "db.t3.micro"
-}
-
-# Parameter group configuration
-variable "enable_slow_query_log" {
-  description = "Enable slow query log"
-  type        = bool
-  default     = true
-}
-
-variable "long_query_time" {
-  description = "Threshold for slow query log in seconds"
-  type        = number
-  default     = 2
-}
-
-variable "enable_general_log" {
-  description = "Enable general query log"
-  type        = bool
-  default     = true
-}
-
-# Connection configuration
-variable "max_connections" {
-  description = "Maximum number of database connections"
-  type        = number
-  default     = 1000
-}
-
-# Performance configuration
-variable "innodb_buffer_pool_size_percent" {
-  description = "Percentage of memory to allocate to InnoDB buffer pool"
-  type        = number
-  default     = 75
 }

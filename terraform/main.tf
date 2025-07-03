@@ -70,7 +70,12 @@ module "database" {
   deployment_suffix  = local.deployment_suffix
   tags               = local.common_tags
 
-  enable_performance_insights = false #disable Performance Insights sice db.t3.micro doesn't support it
+  # FIXED: Explicitly disable features not supported by t3.micro
+  db_instance_class          = "db.t3.small"
+  db_storage_type            = "gp2" # More compatible than gp3
+  enable_deletion_protection = false
+  skip_final_snapshot        = true # For easier testing/cleanup
+  apply_immediately          = true # Apply changes immediately
 }
 
 # Load Balancer Module - Application Load Balancer for high availability
