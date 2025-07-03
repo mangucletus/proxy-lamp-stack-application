@@ -2,7 +2,7 @@ locals {
   # Static AMI ID for Ubuntu 22.04 LTS in eu-central-1 - Updated to latest
   ubuntu_ami_id = "ami-0e067cc8a2b58de59"
 }
-
+# Auto Scaling Policies
 # Auto Scaling Policies
 resource "aws_autoscaling_policy" "scale_up" {
   name                   = "proxy-lamp-scale-up-${var.deployment_suffix}"
