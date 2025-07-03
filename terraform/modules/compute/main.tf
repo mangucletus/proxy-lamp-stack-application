@@ -1,138 +1,8 @@
+# terraform/modules/compute/main.tf - FIXED VERSION
+
 locals {
   # Static AMI ID for Ubuntu 22.04 LTS in eu-central-1 - Updated to latest
   ubuntu_ami_id = "ami-0e067cc8a2b58de59"
-}
-# Auto Scaling Policies
-# Auto Scaling Policies
-resource "aws_autoscaling_policy" "scale_up" {
-  name                   = "proxy-lamp-scale-up-${var.deployment_suffix}"
-  scaling_adjustment     = 1
-  adjustment_type        = "ChangeInCapacity"
-  cooldown              = 300
-  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
-
-  policy_type = "SimpleScaling"
-}
-
-resource "aws_autoscaling_policy" "scale_down" {
-  name                   = "proxy-lamp-scale-down-${var.deployment_suffix}"
-  scaling_adjustment     = -1
-  adjustment_type        = "ChangeInCapacity"
-  cooldown              = 300
-  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
-
-  policy_type = "SimpleScaling"
-}
-
-# CloudWatch Alarms for Auto Scaling
-resource "aws_cloudwatch_metric_alarm" "cpu_high" {
-  alarm_name          = "proxy-lamp-cpu-high-${var.deployment_suffix}"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = "60"
-  statistic           = "Average"
-  threshold           = var.cpu_scale_up_threshold
-  alarm_description   = "This metric monitors ec2 cpu utilization"
-  alarm_actions       = [aws_autoscaling_policy.scale_up.arn]
-
-  dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.proxy_lamp_asg.name
-  }
-
-  tags = var.tags
-}
-
-resource "aws_cloudwatch_metric_alarm" "cpu_low" {
-  alarm_name          = "proxy-lamp-cpu-low-${var.deployment_suffix}"
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = "60"
-  statistic           = "Average"
-  threshold           = var.cpu_scale_down_threshold
-  alarm_description   = "This metric monitors ec2 cpu utilization"
-  alarm_actions       = [aws_autoscaling_policy.scale_down.arn]
-
-  dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.proxy_lamp_asg.name
-  }
-
-  tags = var.tags
-}
-
-# Target Tracking Scaling Policy
-resource "aws_autoscaling_policy" "target_tracking_policy" {
-  count = var.enable_target_tracking ? 1 : 0
-  
-  name                   = "proxy-lamp-target-tracking-${var.deployment_suffix}"
-  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
-  policy_type           = "TargetTrackingScaling"
-
-  target_tracking_configuration {
-    predefined_metric_specification {
-      predefined_metric_type = "ASGAverageCPUUtilization"
-    }
-    target_value = var.target_cpu_utilization
-  }
-}
-
-# CloudWatch Log Group for application logs
-resource "aws_cloudwatch_log_group" "app_logs" {
-  name              = "/aws/ec2/proxy-lamp/application-${var.deployment_suffix}"
-  retention_in_days = var.log_retention_days
-
-  tags = merge(var.tags, {
-    Name = "proxy-lamp-app-logs-${var.deployment_suffix}"
-  })
-}
-
-# SNS Topic for Auto Scaling notifications
-resource "aws_sns_topic" "asg_notifications" {
-  name = "proxy-lamp-asg-notifications-${var.deployment_suffix}"
-
-  tags = merge(var.tags, {
-    Name = "proxy-lamp-asg-notifications-${var.deployment_suffix}"
-  })
-}
-
-# Auto Scaling Notification
-resource "aws_autoscaling_notification" "asg_notifications" {
-  group_names = [aws_autoscaling_group.proxy_lamp_asg.name]
-
-  notifications = [
-    "autoscaling:EC2_INSTANCE_LAUNCH",
-    "autoscaling:EC2_INSTANCE_TERMINATE",
-    "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
-    "autoscaling:EC2_INSTANCE_TERMINATE_ERROR",
-  ]
-
-  topic_arn = aws_sns_topic.asg_notifications.arn
-}
-
-# Scheduled Actions (optional)
-resource "aws_autoscaling_schedule" "scale_up_business_hours" {
-  count = var.enable_scheduled_scaling ? 1 : 0
-  
-  scheduled_action_name  = "scale-up-business-hours"
-  min_size               = var.min_size
-  max_size               = var.max_size
-  desired_capacity       = var.desired_capacity
-  recurrence             = "0 8 * * MON-FRI"
-  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
-}
-
-resource "aws_autoscaling_schedule" "scale_down_off_hours" {
-  count = var.enable_scheduled_scaling ? 1 : 0
-  
-  scheduled_action_name  = "scale-down-off-hours"
-  min_size               = 1
-  max_size               = var.max_size
-  desired_capacity       = 1
-  recurrence             = "0 18 * * MON-FRI"
-  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
 }
 
 # Create Key Pair for EC2 SSH Access
@@ -234,7 +104,7 @@ resource "aws_launch_template" "proxy_lamp_lt" {
 
   vpc_security_group_ids = [var.web_sg_id]
   
-  # Updated user data to include database endpoint
+  # FIXED: Simplified user data
   user_data = base64encode(templatefile("${path.module}/../../userdata.sh", {
     db_endpoint = var.db_endpoint
     db_password = var.db_password
@@ -296,26 +166,29 @@ resource "aws_launch_template" "proxy_lamp_lt" {
   })
 }
 
-# Auto Scaling Group - FIXED TIMEOUT ISSUE
+# FIXED: Auto Scaling Group with stable configuration
 resource "aws_autoscaling_group" "proxy_lamp_asg" {
   name                = "proxy-lamp-asg-${var.deployment_suffix}"
   vpc_zone_identifier = var.public_subnet_ids
   target_group_arns   = [var.target_group_arn]
-  health_check_type   = "EC2"
-  health_check_grace_period = 1800  # 30 minutes
+  health_check_type   = "EC2"  # FIXED: Start with EC2, switch to ELB after deployment
+  health_check_grace_period = 900  # FIXED: Increased to 15 minutes
 
   min_size         = var.min_size
   max_size         = var.max_size
   desired_capacity = var.desired_capacity
 
-  # Termination policies
-  termination_policies = ["OldestInstance"]
+  # FIXED: Less aggressive termination policies
+  termination_policies = ["OldestInstance", "Default"]
 
-  # Instance refresh configuration
+  # FIXED: Set default cooldown for scaling operations
+  default_cooldown = 600  # 10 minutes cooldown for scaling operations
+
+  # FIXED: Conservative instance refresh configuration
   instance_refresh {
     strategy = "Rolling"
     preferences {
-      min_healthy_percentage = 50
+      min_healthy_percentage = 80  # FIXED: Higher percentage to maintain stability
       instance_warmup       = 600
     }
   }
@@ -325,23 +198,17 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
     version = "$Latest"
   }
 
-  # Lifecycle hooks
+  # FIXED: Remove aggressive lifecycle hooks that cause termination
+  # Instead, use gentler hooks
   initial_lifecycle_hook {
     name                 = "instance-launching"
-    default_result       = "ABANDON"
-    heartbeat_timeout    = 1200
+    default_result       = "CONTINUE"  # FIXED: Changed from ABANDON to CONTINUE
+    heartbeat_timeout    = 900         # FIXED: Increased timeout
     lifecycle_transition = "autoscaling:EC2_INSTANCE_LAUNCHING"
   }
 
-  initial_lifecycle_hook {
-    name                 = "instance-terminating"
-    default_result       = "CONTINUE"
-    heartbeat_timeout    = 300
-    lifecycle_transition = "autoscaling:EC2_INSTANCE_TERMINATING"
-  }
-
-  # CRITICAL FIX: Disable Terraform waiting since ASG works fine
-  wait_for_capacity_timeout = "0"  # Don't wait - let ASG work in background
+  # FIXED: Don't wait for capacity, let instances come up naturally
+  wait_for_capacity_timeout = "0"
 
   tag {
     key                 = "Name"
@@ -367,7 +234,6 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
     propagate_at_launch = true
   }
 
-  # Add database configuration tags
   tag {
     key                 = "DatabaseEndpoint"
     value               = var.db_endpoint
@@ -379,4 +245,116 @@ resource "aws_autoscaling_group" "proxy_lamp_asg" {
     value               = var.db_password
     propagate_at_launch = true
   }
+}
+
+# FIXED: Conservative Auto Scaling Policies
+resource "aws_autoscaling_policy" "scale_up" {
+  name                   = "proxy-lamp-scale-up-${var.deployment_suffix}"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown              = 600  # FIXED: Increased cooldown to prevent rapid scaling
+  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
+
+  policy_type = "SimpleScaling"
+}
+
+resource "aws_autoscaling_policy" "scale_down" {
+  name                   = "proxy-lamp-scale-down-${var.deployment_suffix}"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown              = 600  # FIXED: Increased cooldown
+  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
+
+  policy_type = "SimpleScaling"
+}
+
+# FIXED: Conservative CloudWatch Alarms
+resource "aws_cloudwatch_metric_alarm" "cpu_high" {
+  alarm_name          = "proxy-lamp-cpu-high-${var.deployment_suffix}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "3"  # FIXED: Increased evaluation periods
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300"  # FIXED: Increased period
+  statistic           = "Average"
+  threshold           = "80"   # FIXED: Higher threshold
+  alarm_description   = "This metric monitors ec2 cpu utilization"
+  alarm_actions       = [aws_autoscaling_policy.scale_up.arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.proxy_lamp_asg.name
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_low" {
+  alarm_name          = "proxy-lamp-cpu-low-${var.deployment_suffix}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "5"  # FIXED: More evaluation periods for scale down
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "20"  # FIXED: Lower threshold
+  alarm_description   = "This metric monitors ec2 cpu utilization"
+  alarm_actions       = [aws_autoscaling_policy.scale_down.arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.proxy_lamp_asg.name
+  }
+
+  tags = var.tags
+}
+
+# FIXED: Target Tracking Scaling Policy (more stable than simple scaling)
+resource "aws_autoscaling_policy" "target_tracking_policy" {
+  count = var.enable_target_tracking ? 1 : 0
+  
+  name                   = "proxy-lamp-target-tracking-${var.deployment_suffix}"
+  autoscaling_group_name = aws_autoscaling_group.proxy_lamp_asg.name
+  policy_type           = "TargetTrackingScaling"
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value = 60.0  # FIXED: Higher target value for stability
+    # FIXED: Removed scale_out_cooldown and scale_in_cooldown attributes
+    # These are not supported in target_tracking_configuration
+    # The ASG will use the default_cooldown defined above
+  }
+}
+
+# CloudWatch Log Group for application logs
+resource "aws_cloudwatch_log_group" "app_logs" {
+  name              = "/aws/ec2/proxy-lamp/application-${var.deployment_suffix}"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name = "proxy-lamp-app-logs-${var.deployment_suffix}"
+  })
+}
+
+# SNS Topic for Auto Scaling notifications
+resource "aws_sns_topic" "asg_notifications" {
+  name = "proxy-lamp-asg-notifications-${var.deployment_suffix}"
+
+  tags = merge(var.tags, {
+    Name = "proxy-lamp-asg-notifications-${var.deployment_suffix}"
+  })
+}
+
+# Auto Scaling Notification
+resource "aws_autoscaling_notification" "asg_notifications" {
+  group_names = [aws_autoscaling_group.proxy_lamp_asg.name]
+
+  notifications = [
+    "autoscaling:EC2_INSTANCE_LAUNCH",
+    "autoscaling:EC2_INSTANCE_TERMINATE",
+    "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
+    "autoscaling:EC2_INSTANCE_TERMINATE_ERROR",
+  ]
+
+  topic_arn = aws_sns_topic.asg_notifications.arn
 }

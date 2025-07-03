@@ -1,29 +1,31 @@
+# terraform/modules/compute/variables.tf - FIXED VERSION
+
 # Define the AWS region to deploy resources in
 variable "aws_region" {
-  description = "AWS region"      # A short description for documentation
-  type        = string            # The type must be a string
-  default     = "eu-central-1"    # Updated region (Frankfurt)
+  description = "AWS region"      
+  type        = string            
+  default     = "eu-central-1"    
 }
 
-# Define the EC2 instance type (hardware configuration)
+# FIXED: Define the EC2 instance type (upgraded for better performance)
 variable "instance_type" {
-  description = "EC2 instance type"   # Explains the purpose of the variable
-  type        = string                # The type must be a string
-  default     = "t3.micro"            # Cost-effective instance type under free tier
+  description = "EC2 instance type"   
+  type        = string                
+  default     = "t3.small"            # FIXED: Changed from t3.micro to t3.small for better performance
 }
 
 # Name of the SSH key pair used to connect to the EC2 instance
 variable "key_name" {
-  description = "AWS key pair name"   # Short description for the variable
-  type        = string                # Must be a string (e.g., "proxy-lamp-keypair")
-  default     = "proxy-lamp-keypair"  # Updated default value with prefix
+  description = "AWS key pair name"   
+  type        = string                
+  default     = "proxy-lamp-keypair"  
 }
 
 # The actual public key content to inject into the instance for SSH access
 variable "public_key" {
-  description = "Public key for EC2 access"  # What this key is for
-  type        = string                       # Public key content as a string
-  sensitive   = true                         # Hides value from CLI/UI output for security
+  description = "Public key for EC2 access"  
+  type        = string                       
+  sensitive   = true                         
 }
 
 variable "public_subnet_ids" {
@@ -96,17 +98,17 @@ variable "enable_detailed_monitoring" {
   default     = true
 }
 
-# Auto Scaling configuration
+# FIXED: More conservative auto scaling configuration
 variable "cpu_scale_up_threshold" {
   description = "CPU utilization threshold to trigger scale up"
   type        = number
-  default     = 70
+  default     = 80  # FIXED: Increased from 70 to 80
 }
 
 variable "cpu_scale_down_threshold" {
   description = "CPU utilization threshold to trigger scale down"
   type        = number
-  default     = 30
+  default     = 20  # FIXED: Decreased from 30 to 20
 }
 
 variable "enable_target_tracking" {
@@ -118,7 +120,7 @@ variable "enable_target_tracking" {
 variable "target_cpu_utilization" {
   description = "Target CPU utilization for target tracking scaling"
   type        = number
-  default     = 50
+  default     = 60  # FIXED: Increased from 50 to 60 for more stability
 }
 
 variable "enable_scheduled_scaling" {
@@ -131,13 +133,13 @@ variable "enable_scheduled_scaling" {
 variable "health_check_grace_period" {
   description = "Health check grace period in seconds"
   type        = number
-  default     = 300
+  default     = 900  # FIXED: Increased from 300 to 900 (15 minutes)
 }
 
 variable "health_check_type" {
   description = "Health check type (EC2 or ELB)"
   type        = string
-  default     = "ELB"
+  default     = "EC2"  # FIXED: Start with EC2, will be changed to ELB after deployment
 }
 
 # Launch template configuration
@@ -157,20 +159,20 @@ variable "instance_metadata_hop_limit" {
 variable "instance_warmup_time" {
   description = "Instance warmup time in seconds"
   type        = number
-  default     = 300
+  default     = 600  # FIXED: Increased from 300 to 600
 }
 
 variable "default_cooldown" {
   description = "Default cooldown period in seconds"
   type        = number
-  default     = 300
+  default     = 600  # FIXED: Increased from 300 to 600
 }
 
 # Termination configuration
 variable "termination_policies" {
   description = "List of termination policies"
   type        = list(string)
-  default     = ["OldestInstance"]
+  default     = ["OldestInstance", "Default"]  # FIXED: Less aggressive termination
 }
 
 # Logging configuration
@@ -190,7 +192,7 @@ variable "enable_instance_refresh" {
 variable "min_healthy_percentage" {
   description = "Minimum healthy percentage during instance refresh"
   type        = number
-  default     = 50
+  default     = 80  # FIXED: Increased from 50 to 80 for more stability
 }
 
 # Placement configuration

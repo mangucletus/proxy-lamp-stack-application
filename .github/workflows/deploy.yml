@@ -93,8 +93,8 @@ jobs:
 
     - name: Wait for Infrastructure to be Ready
       run: |
-        echo "Waiting for Auto Scaling Group instances to be fully initialized..."
-        sleep 300  # FIXED: Increased from 120 to 300 seconds (5 minutes)
+        echo "Waiting for Auto Scaling Group instances to be ready..."
+        sleep 180  # FIXED: Reduced initial wait to 3 minutes
 
     - name: Get Instance IPs from Auto Scaling Group
       id: get-instances
@@ -103,9 +103,9 @@ jobs:
       run: |
         echo "Getting instance IPs from Auto Scaling Group: $ASG_NAME"
         
-        # FIXED: Wait for instances to appear in ASG (up to 10 minutes)
+        # FIXED: Wait for instances to appear in ASG (up to 15 minutes)
         echo "=== Waiting for instances to appear in ASG ==="
-        for attempt in {1..20}; do
+        for attempt in {1..30}; do
           ALL_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "$ASG_NAME" \
             --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
@@ -115,30 +115,20 @@ jobs:
             echo "✅ Found instances in ASG: $ALL_INSTANCE_IDS"
             break
           else
-            echo "⏳ Waiting for instances in ASG... attempt $attempt/20"
+            echo "⏳ Waiting for instances in ASG... attempt $attempt/30"
             sleep 30
           fi
           
-          if [ $attempt -eq 20 ]; then
-            echo "❌ No instances found in ASG after 10 minutes"
-            echo "Checking ASG configuration..."
-            aws autoscaling describe-auto-scaling-groups \
-              --auto-scaling-group-names "$ASG_NAME" \
-              --query 'AutoScalingGroups[0].{MinSize:MinSize,MaxSize:MaxSize,DesiredCapacity:DesiredCapacity,Instances:Instances}' || echo "Could not get ASG info"
+          if [ $attempt -eq 30 ]; then
+            echo "❌ No instances found in ASG after 15 minutes"
             exit 1
           fi
         done
         
-        echo "=== All instances in ASG ==="
-        aws autoscaling describe-auto-scaling-groups \
-          --auto-scaling-group-names "$ASG_NAME" \
-          --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,State:LifecycleState,Health:HealthStatus}' \
-          --output table
-        
-        # FIXED: Wait for instances to be in Running state (up to 15 minutes)
+        # FIXED: Wait for instances to be in Running state (up to 10 minutes)
         echo "=== Waiting for instances to be in running state ==="
         RUNNING_INSTANCES=""
-        for attempt in {1..30}; do
+        for attempt in {1..20}; do
           RUNNING_INSTANCES=""
           for INSTANCE_ID in $ALL_INSTANCE_IDS; do
             INSTANCE_STATE=$(aws ec2 describe-instances \
@@ -159,12 +149,12 @@ jobs:
             echo "✅ Found running instances: $RUNNING_INSTANCES"
             break
           else
-            echo "⏳ Waiting for running instances... attempt $attempt/30"
+            echo "⏳ Waiting for running instances... attempt $attempt/20"
             sleep 30
           fi
           
-          if [ $attempt -eq 30 ]; then
-            echo "❌ No running instances found after 15 minutes"
+          if [ $attempt -eq 20 ]; then
+            echo "❌ No running instances found after 10 minutes"
             exit 1
           fi
         done
@@ -179,18 +169,6 @@ jobs:
         INSTANCE_IPS=$(echo "$INSTANCE_IPS_RAW" | tr '\n\t' ' ' | tr -s ' ' | xargs)
         
         echo "Public IPs: $INSTANCE_IPS"
-        
-        # If no public IPs, try private IPs
-        if [ -z "$INSTANCE_IPS" ] || [ "$INSTANCE_IPS" = "None" ]; then
-          echo "No public IPs found, trying private IPs..."
-          INSTANCE_IPS_RAW=$(aws ec2 describe-instances \
-            --instance-ids $RUNNING_INSTANCES \
-            --query 'Reservations[].Instances[?State.Name==`running`].PrivateIpAddress' \
-            --output text)
-          
-          INSTANCE_IPS=$(echo "$INSTANCE_IPS_RAW" | tr '\n\t' ' ' | tr -s ' ' | xargs)
-          echo "Private IPs: $INSTANCE_IPS"
-        fi
         
         # Validate IPs
         if [ -z "$INSTANCE_IPS" ]; then
@@ -228,13 +206,6 @@ jobs:
         
         ls -la app/
         
-        if [ -d "monitoring" ]; then
-          MONITORING_EXISTS=true
-        else
-          echo "⚠️ Monitoring directory not found - will skip monitoring setup"
-          MONITORING_EXISTS=false
-        fi
-        
         SUCCESS_COUNT=0
         TOTAL_COUNT=0
         
@@ -251,75 +222,54 @@ jobs:
             continue
           fi
           
-          # FIXED: Wait for SSH with longer timeout (up to 20 minutes)
+          # FIXED: Wait for SSH with reasonable timeout (up to 10 minutes)
           echo "Waiting for SSH connection to $INSTANCE_IP..."
           SSH_SUCCESS=false
           
-          for i in {1..40}; do
-            if timeout 30 ssh -i private_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes ubuntu@$INSTANCE_IP "echo 'SSH connection successful'" 2>/dev/null; then
+          for i in {1..20}; do
+            if timeout 15 ssh -i private_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes ubuntu@$INSTANCE_IP "echo 'SSH connection successful'" 2>/dev/null; then
               echo "✅ SSH connection established to $INSTANCE_IP!"
               SSH_SUCCESS=true
               break
             fi
-            echo "Waiting for SSH... attempt $i/40"
+            echo "Waiting for SSH... attempt $i/20"
             sleep 30
           done
           
           if [ "$SSH_SUCCESS" = false ]; then
-            echo "❌ Failed to establish SSH connection to $INSTANCE_IP after 20 minutes"
-            echo "Checking instance status..."
-            
-            INSTANCE_ID=$(aws ec2 describe-instances \
-              --filters "Name=ip-address,Values=$INSTANCE_IP" \
-              --query 'Reservations[0].Instances[0].InstanceId' \
-              --output text 2>/dev/null || echo "unknown")
-            
-            if [ "$INSTANCE_ID" != "unknown" ] && [ "$INSTANCE_ID" != "None" ]; then
-              echo "Instance ID: $INSTANCE_ID"
-              aws ec2 describe-instance-status --instance-ids "$INSTANCE_ID" || echo "Could not get instance status"
-            fi
+            echo "❌ Failed to establish SSH connection to $INSTANCE_IP after 10 minutes"
             continue
           fi
           
-          # FIXED: Wait for LAMP stack to be ready
-          echo "Waiting for LAMP stack setup to complete on $INSTANCE_IP..."
+          # FIXED: Wait for basic LAMP stack (reduced timeout)
+          echo "Checking if basic LAMP stack is ready on $INSTANCE_IP..."
           LAMP_READY=false
           
-          for attempt in {1..40}; do
-            if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "[ -f /tmp/lamp-setup-complete ]" 2>/dev/null; then
-              echo "✅ LAMP stack setup completed on $INSTANCE_IP"
+          for attempt in {1..20}; do
+            # FIXED: Check if Apache is responding instead of looking for file
+            if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "curl -s -f http://localhost/ > /dev/null" 2>/dev/null; then
+              echo "✅ Apache is responding on $INSTANCE_IP"
               LAMP_READY=true
               break
             else
-              echo "⏳ Waiting for LAMP stack setup... attempt $attempt/40"
-              sleep 30
+              echo "⏳ Waiting for Apache to respond... attempt $attempt/20"
+              sleep 15
             fi
           done
           
           if [ "$LAMP_READY" = false ]; then
-            echo "❌ LAMP stack setup did not complete on $INSTANCE_IP"
-            echo "Checking setup logs..."
+            echo "❌ Apache is not responding on $INSTANCE_IP"
+            echo "Checking server status..."
             ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
-              echo '=== User Data Log (last 50 lines) ==='
-              tail -50 /var/log/user-data.log 2>/dev/null || echo 'User data log not found'
-              echo '=== Cloud Init Output (last 30 lines) ==='
-              tail -30 /var/log/cloud-init-output.log 2>/dev/null || echo 'Cloud init log not found'
-              echo '=== Apache Status ==='
+              echo '=== System Status ==='
               systemctl status apache2 --no-pager || echo 'Apache status unknown'
+              echo '=== User Data Log (last 20 lines) ==='
+              tail -20 /var/log/user-data.log 2>/dev/null || echo 'User data log not found'
             " || echo "Could not retrieve debug information"
             continue
           fi
           
-          # Test basic connectivity before deploying app
-          echo "Testing basic web server on $INSTANCE_IP..."
-          if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "curl -s -f http://localhost/ > /dev/null" 2>/dev/null; then
-            echo "✅ Web server is responding on $INSTANCE_IP"
-          else
-            echo "❌ Web server is not responding on $INSTANCE_IP"
-            continue
-          fi
-          
-          # Copy application files
+          # FIXED: Copy application files with error handling
           echo "Deploying application files to $INSTANCE_IP..."
           if scp -i private_key.pem -o StrictHostKeyChecking=no -r app/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
             echo "✅ App files copied successfully"
@@ -328,24 +278,11 @@ jobs:
             continue
           fi
           
-          # Copy monitoring files if they exist
-          if [ "$MONITORING_EXISTS" = true ]; then
-            echo "Copying monitoring files to $INSTANCE_IP..."
-            if scp -i private_key.pem -o StrictHostKeyChecking=no -r monitoring/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
-              echo "✅ Monitoring files copied successfully"
-              MONITORING_DEPLOYED=true
-            else
-              echo "⚠️ Failed to copy monitoring files to $INSTANCE_IP (continuing anyway)"
-              MONITORING_DEPLOYED=false
-            fi
-          else
-            MONITORING_DEPLOYED=false
-          fi
-          
-          # FIXED: Deploy application with comprehensive error handling
+          # FIXED: Deploy application with better error handling
           echo "Setting up web application on $INSTANCE_IP..."
           if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
-            echo 'Installing application files...'
+            set -e
+            echo 'Deploying application files...'
             
             # Backup existing files
             sudo cp -r /var/www/html /var/www/html.backup.\$(date +%s) 2>/dev/null || echo 'No existing files to backup'
@@ -362,36 +299,16 @@ jobs:
             
             # Validate PHP syntax
             echo 'Validating PHP syntax...'
-            PHP_SYNTAX_OK=true
             for phpfile in /var/www/html/*.php; do
               if [ -f \"\$phpfile\" ]; then
                 if ! php -l \"\$phpfile\" >/dev/null 2>&1; then
                   echo \"❌ PHP syntax error in \$phpfile\"
                   php -l \"\$phpfile\" || true
-                  PHP_SYNTAX_OK=false
+                  exit 1
                 fi
               fi
             done
-            
-            if [ \"\$PHP_SYNTAX_OK\" != \"true\" ]; then
-              echo '❌ PHP syntax errors found - cannot proceed with deployment'
-              exit 1
-            fi
             echo '✅ All PHP files have valid syntax'
-            
-            # Set up monitoring only if files were successfully copied
-            if [ '$MONITORING_DEPLOYED' = true ]; then
-              echo 'Setting up monitoring...'
-              sudo cp /tmp/cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/ 2>/dev/null || echo 'CloudWatch agent config copy failed'
-              sudo cp /tmp/custom-metrics.sh /usr/local/bin/ 2>/dev/null || echo 'Custom metrics script copy failed'
-              sudo chmod +x /usr/local/bin/custom-metrics.sh 2>/dev/null || echo 'Failed to make custom-metrics.sh executable'
-              
-              # Restart CloudWatch agent if config was updated
-              sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
-                -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json 2>/dev/null || echo 'CloudWatch agent restart failed'
-            else
-              echo 'Skipping monitoring setup (files not available)'
-            fi
             
             # Test Apache configuration
             echo 'Testing Apache configuration...'
@@ -404,40 +321,36 @@ jobs:
             
             # Restart Apache
             echo 'Restarting Apache...'
-            if sudo systemctl restart apache2; then
-              echo '✅ Apache restarted successfully'
+            if sudo systemctl reload apache2; then
+              echo '✅ Apache reloaded successfully'
             else
-              echo '❌ Apache restart failed'
-              sudo systemctl status apache2 --no-pager || true
-              exit 1
+              echo 'Apache reload failed, trying restart...'
+              if sudo systemctl restart apache2; then
+                echo '✅ Apache restarted successfully'
+              else
+                echo '❌ Apache restart failed'
+                sudo systemctl status apache2 --no-pager || true
+                exit 1
+              fi
             fi
             
-            sleep 5
+            sleep 3
             
             # Test final connectivity
             echo 'Testing final connectivity...'
-            HTTP_SUCCESS=false
             for attempt in {1..10}; do
               if curl -s -f http://localhost/ > /dev/null; then
-                echo \"✅ Local HTTP test passed (attempt \$attempt)\"
-                HTTP_SUCCESS=true
+                echo \"✅ Application is responding (attempt \$attempt)\"
                 break
               else
-                echo \"⏳ Local HTTP test failed, attempt \$attempt/10\"
+                echo \"⏳ Application test failed, attempt \$attempt/10\"
+                if [ \$attempt -eq 10 ]; then
+                  echo '❌ Application is not responding after deployment'
+                  exit 1
+                fi
                 sleep 2
               fi
             done
-            
-            if [ \"\$HTTP_SUCCESS\" != \"true\" ]; then
-              echo '❌ Application is not responding after deployment'
-              echo '=== DEBUGGING INFORMATION ==='
-              sudo systemctl status apache2 --no-pager || true
-              echo '--- Apache Error Log (last 20 lines) ---'
-              sudo tail -20 /var/log/apache2/error.log || true
-              echo '--- Files in /var/www/html ---'
-              ls -la /var/www/html/ || true
-              exit 1
-            fi
             
             echo '✅ Application deployment successful'
           "; then
@@ -460,6 +373,13 @@ jobs:
         if [ $SUCCESS_COUNT -gt 0 ]; then
           echo "🎉 Application deployed successfully to $SUCCESS_COUNT instance(s)!"
           echo "🌐 Access your load-balanced application at: http://$LOAD_BALANCER_DNS"
+          
+          # FIXED: Update ASG health check type to ELB after successful deployment
+          echo "Updating Auto Scaling Group health check type to ELB..."
+          aws autoscaling update-auto-scaling-group \
+            --auto-scaling-group-name "${{ needs.terraform.outputs.autoscaling_group_name }}" \
+            --health-check-type ELB \
+            --health-check-grace-period 300 || echo "Warning: Could not update health check type"
         else
           echo "❌ All deployments failed!"
           exit 1
@@ -483,50 +403,132 @@ jobs:
       env:
         LOAD_BALANCER_DNS: ${{ needs.terraform.outputs.load_balancer_dns }}
       run: |
-        echo "Waiting for load balancer health checks to pass..."
-        sleep 300  # FIXED: Increased wait time to 5 minutes
+        echo "Waiting for load balancer and application to be fully ready..."
+        sleep 120  # FIXED: Reduced initial wait time
         
-        # Test load balancer endpoint with more attempts
-        for i in {1..20}; do
-          echo "Testing load balancer... attempt $i/20"
-          if curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/health.php" > /dev/null; then
-            echo "✅ Load balancer health check passed!"
-            echo "🌐 Application is healthy at: http://$LOAD_BALANCER_DNS"
+        echo "Load balancer DNS: $LOAD_BALANCER_DNS"
+        
+        # FIXED: Test load balancer endpoint with more reasonable attempts
+        HEALTH_SUCCESS=false
+        APP_SUCCESS=false
+        
+        for i in {1..30}; do
+          echo "Testing load balancer... attempt $i/30"
+          
+          # Test health endpoint
+          if curl -f -s -m 15 "http://$LOAD_BALANCER_DNS/health.php" > /dev/null 2>&1; then
+            echo "✅ Health endpoint is responding!"
+            HEALTH_SUCCESS=true
+          fi
+          
+          # Test main application
+          if curl -f -s -m 15 "http://$LOAD_BALANCER_DNS/" > /dev/null 2>&1; then
+            echo "✅ Main application is responding!"
+            APP_SUCCESS=true
+          fi
+          
+          # If both are working, we're good
+          if [ "$HEALTH_SUCCESS" = "true" ] && [ "$APP_SUCCESS" = "true" ]; then
+            echo "✅ Both health check and application are responding!"
             break
-          elif curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/" > /dev/null; then
-            echo "✅ Main application page is accessible!"
-            echo "🌐 Application is accessible at: http://$LOAD_BALANCER_DNS"
-            break
+          fi
+          
+          # If at least one is working, continue with lighter checks
+          if [ "$HEALTH_SUCCESS" = "true" ] || [ "$APP_SUCCESS" = "true" ]; then
+            echo "⏳ Partial success, continuing checks..."
           else
-            echo "⏳ Waiting for health check... attempt $i/20"
-            if [ $i -eq 20 ]; then
-              echo "❌ Health check failed after 20 attempts"
-              echo "🔍 Let's check what's available..."
-              
-              echo "Load balancer DNS: $LOAD_BALANCER_DNS"
-              
-              # Test basic connectivity
-              if ping -c 3 "$LOAD_BALANCER_DNS" > /dev/null 2>&1; then
-                echo "✅ Load balancer DNS resolves and is reachable"
-              else
-                echo "❌ Load balancer DNS does not resolve or is not reachable"
-              fi
-              
-              # Try HTTP request with more details
-              echo "Detailed HTTP test:"
-              curl -v -m 15 "http://$LOAD_BALANCER_DNS/" || echo "Detailed HTTP test failed"
-              
-              echo "⚠️ Application may be accessible but health checks are failing"
-              echo "🌐 Try accessing: http://$LOAD_BALANCER_DNS"
+            echo "⏳ No response yet, waiting..."
+          fi
+          
+          if [ $i -eq 30 ]; then
+            echo "❌ Health checks did not pass after 30 attempts"
+            
+            # FIXED: Provide detailed debugging information
+            echo "🔍 Debugging information:"
+            echo "Load balancer DNS: $LOAD_BALANCER_DNS"
+            
+            # Test DNS resolution
+            if nslookup "$LOAD_BALANCER_DNS" > /dev/null 2>&1; then
+              echo "✅ DNS resolution works"
             else
-              sleep 60  # FIXED: Increased sleep between attempts
+              echo "❌ DNS resolution failed"
             fi
+            
+            # Test basic connectivity
+            if ping -c 3 "$LOAD_BALANCER_DNS" > /dev/null 2>&1; then
+              echo "✅ Load balancer is reachable via ping"
+            else
+              echo "❌ Load balancer is not reachable via ping"
+            fi
+            
+            # Detailed HTTP test for health endpoint
+            echo "Detailed health endpoint test:"
+            curl -v -m 15 "http://$LOAD_BALANCER_DNS/health.php" 2>&1 || echo "Health endpoint test failed"
+            
+            # Detailed HTTP test for main app
+            echo "Detailed main application test:"
+            curl -v -m 15 "http://$LOAD_BALANCER_DNS/" 2>&1 || echo "Main application test failed"
+            
+            # Check load balancer target health
+            echo "Checking load balancer target health..."
+            LB_ARN=$(aws elbv2 describe-load-balancers --names "*proxy-lamp*" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "unknown")
+            if [ "$LB_ARN" != "unknown" ] && [ "$LB_ARN" != "None" ]; then
+              TG_ARN=$(aws elbv2 describe-target-groups --load-balancer-arn "$LB_ARN" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "unknown")
+              if [ "$TG_ARN" != "unknown" ] && [ "$TG_ARN" != "None" ]; then
+                echo "Target group health:"
+                aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --output table 2>/dev/null || echo "Could not get target health"
+              fi
+            fi
+            
+            # Don't fail the deployment if health checks are partial
+            if [ "$HEALTH_SUCCESS" = "true" ] || [ "$APP_SUCCESS" = "true" ]; then
+              echo "⚠️ Partial health check success - deployment considered successful"
+              echo "🌐 Try accessing: http://$LOAD_BALANCER_DNS"
+              break
+            else
+              echo "❌ Complete health check failure"
+              exit 1
+            fi
+          else
+            sleep 60  # FIXED: Wait 1 minute between attempts
           fi
         done
         
-        echo "Deployment completed! 🚀"
         echo ""
         echo "=== FINAL DEPLOYMENT STATUS ==="
         echo "🌐 Application URL: http://$LOAD_BALANCER_DNS"
         echo "🔍 Health Check: http://$LOAD_BALANCER_DNS/health.php"
         echo "📊 AWS Console: https://console.aws.amazon.com/ec2/home?region=${{ env.AWS_REGION }}"
+        echo ""
+        
+        # FIXED: Final verification with detailed status
+        echo "=== FINAL VERIFICATION ==="
+        
+        # Test health endpoint one more time
+        if curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/health.php" > /tmp/final_health.json 2>/dev/null; then
+          echo "✅ Health endpoint final test: PASSED"
+          if command -v jq >/dev/null 2>&1 && [ -f /tmp/final_health.json ]; then
+            HEALTH_STATUS=$(jq -r '.status // "unknown"' /tmp/final_health.json 2>/dev/null || echo "unknown")
+            SERVER_NAME=$(jq -r '.server // "unknown"' /tmp/final_health.json 2>/dev/null || echo "unknown")
+            echo "   Status: $HEALTH_STATUS"
+            echo "   Server: $SERVER_NAME"
+            
+            # Show database status
+            DB_STATUS=$(jq -r '.checks.database.status // "unknown"' /tmp/final_health.json 2>/dev/null || echo "unknown")
+            echo "   Database: $DB_STATUS"
+          fi
+        else
+          echo "⚠️ Health endpoint final test: FAILED"
+        fi
+        
+        # Test main application one more time
+        if curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/" > /dev/null 2>/dev/null; then
+          echo "✅ Main application final test: PASSED"
+        else
+          echo "⚠️ Main application final test: FAILED"
+        fi
+        
+        echo ""
+        echo "🚀 Deployment completed!"
+        echo "📝 Note: It may take a few more minutes for all health checks to stabilize"
+        echo "💡 If you encounter issues, check the target group health in the AWS console"

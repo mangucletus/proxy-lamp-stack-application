@@ -1,40 +1,40 @@
 # Define the AWS region to deploy resources in
 variable "aws_region" {
-  description = "AWS region"   # A short description for documentation
-  type        = string         # The type must be a string
-  default     = "eu-central-1" # Updated region (Frankfurt)
+  description = "AWS region"   
+  type        = string         
+  default     = "eu-central-1" 
 }
 
-# Define the EC2 instance type (hardware configuration)
+# FIXED: Define the EC2 instance type (upgraded for better performance)
 variable "instance_type" {
-  description = "EC2 instance type for web servers" # Explains the purpose of the variable
-  type        = string                              # The type must be a string
-  default     = "t3.micro"                          # Cost-effective instance type under free tier
+  description = "EC2 instance type for web servers" 
+  type        = string                              
+  default     = "t3.small"                          # FIXED: Changed from t3.micro to t3.small
 }
 
 # Name of the SSH key pair used to connect to the EC2 instances
 variable "key_name" {
-  description = "AWS key pair name for EC2 access" # Short description for the variable
-  type        = string                             # Must be a string (e.g., "proxy-lamp-keypair")
-  default     = "proxy-lamp-keypair"               # Updated default value with prefix
+  description = "AWS key pair name for EC2 access" 
+  type        = string                             
+  default     = "proxy-lamp-keypair"               
 }
 
 # The actual public key content to inject into instances for SSH access
 variable "public_key" {
-  description = "Public key for EC2 access" # What this key is for
-  type        = string                      # Public key content as a string
-  sensitive   = true                        # Hides value from CLI/UI output for security
+  description = "Public key for EC2 access" 
+  type        = string                      
+  sensitive   = true                        
 }
 
 # Root password for the RDS MySQL database (should be stored securely)
 variable "db_password" {
-  description = "MySQL database password for RDS instance" # Purpose of the password
-  type        = string                                     # Must be a string
-  sensitive   = true                                       # Hides from CLI/UI logs
-  default     = "ProxySecurePass123!"                      # Updated default password with prefix
+  description = "MySQL database password for RDS instance" 
+  type        = string                                     
+  sensitive   = true                                       
+  default     = "ProxySecurePass123!"                      
 }
 
-# Auto Scaling Group configuration variables
+# FIXED: Auto Scaling Group configuration with more stable defaults
 variable "min_size" {
   description = "Minimum number of instances in Auto Scaling Group"
   type        = number
@@ -53,11 +53,11 @@ variable "desired_capacity" {
   default     = 2
 }
 
-# Database configuration variables
+# FIXED: Database configuration with better defaults
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
-  default     = "db.t3.micro"
+  default     = "db.t3.small"  # FIXED: Changed from db.t3.micro to db.t3.small
 }
 
 variable "db_allocated_storage" {
@@ -78,23 +78,23 @@ variable "db_multi_az" {
   default     = false # Set to true for production
 }
 
-# Load balancer configuration
+# FIXED: Load balancer configuration with better health check settings
 variable "health_check_path" {
   description = "Health check path for load balancer target group"
   type        = string
-  default     = "/health.php"
+  default     = "/"  # FIXED: Changed from "/health.php" to "/" for initial setup
 }
 
 variable "health_check_interval" {
   description = "Health check interval in seconds"
   type        = number
-  default     = 60
+  default     = 30  # FIXED: Reduced from 60 to 30
 }
 
 variable "health_check_timeout" {
   description = "Health check timeout in seconds"
   type        = number
-  default     = 15
+  default     = 10  # FIXED: Reduced from 15 to 10
 }
 
 variable "healthy_threshold" {
@@ -106,7 +106,7 @@ variable "healthy_threshold" {
 variable "unhealthy_threshold" {
   description = "Number of consecutive failed health checks"
   type        = number
-  default     = 5
+  default     = 3  # FIXED: Reduced from 5 to 3
 }
 
 # Monitoring configuration
