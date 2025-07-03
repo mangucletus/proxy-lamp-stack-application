@@ -107,7 +107,100 @@ echo json_encode([
 EOF
 
 #-------------------------------
-# 12. Configure CloudWatch Agent
+# 12. Configure Database Connection
+#-------------------------------
+# Get database endpoint from EC2 user data or instance tags
+INSTANCE_ID=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+
+# Function to get tag value
+get_tag_value() {
+    local tag_key="$$1"
+    aws ec2 describe-tags \
+        --region "$$REGION" \
+        --filters "Name=resource-id,Values=$$INSTANCE_ID" "Name=key,Values=$$tag_key" \
+        --query 'Tags[0].Value' \
+        --output text 2>/dev/null || echo ""
+}
+
+# Try to get database info from tags (set by Terraform)
+DB_ENDPOINT=$$(get_tag_value "DatabaseEndpoint")
+DB_PASSWORD_TAG=$$(get_tag_value "DatabasePassword")
+
+# If not found in tags, try other methods
+if [ -z "$$DB_ENDPOINT" ]; then
+    # Try to get from Auto Scaling Group tags
+    ASG_NAME=$$(aws autoscaling describe-auto-scaling-instances \
+        --region "$$REGION" \
+        --instance-ids "$$INSTANCE_ID" \
+        --query 'AutoScalingInstances[0].AutoScalingGroupName' \
+        --output text 2>/dev/null || echo "")
+    
+    if [ -n "$$ASG_NAME" ]; then
+        DB_ENDPOINT=$$(aws autoscaling describe-tags \
+            --region "$$REGION" \
+            --filters "Name=auto-scaling-group,Values=$$ASG_NAME" "Name=key,Values=DatabaseEndpoint" \
+            --query 'Tags[0].Value' \
+            --output text 2>/dev/null || echo "")
+        
+        DB_PASSWORD_TAG=$$(aws autoscaling describe-tags \
+            --region "$$REGION" \
+            --filters "Name=auto-scaling-group,Values=$$ASG_NAME" "Name=key,Values=DatabasePassword" \
+            --query 'Tags[0].Value' \
+            --output text 2>/dev/null || echo "")
+    fi
+fi
+
+# Use template variables if available, otherwise use discovered values
+DB_ENDPOINT_FINAL="${db_endpoint}"
+DB_PASSWORD_FINAL="${db_password}"
+
+# If template variables are empty, try to get from instance tags
+if [ -z "$$DB_ENDPOINT_FINAL" ] || [ "$$DB_ENDPOINT_FINAL" = "proxy-lamp-mysql-endpoint" ]; then
+    DB_ENDPOINT_FINAL="$$DB_ENDPOINT"
+fi
+
+if [ -z "$$DB_PASSWORD_FINAL" ] || [ "$$DB_PASSWORD_FINAL" = "ProxySecurePass123!" ]; then
+    DB_PASSWORD_FINAL="$$DB_PASSWORD_TAG"
+fi
+
+# Final fallback values
+DB_ENDPOINT_FINAL="$${DB_ENDPOINT_FINAL:-proxy-lamp-mysql-endpoint}"
+DB_PASSWORD_FINAL="$${DB_PASSWORD_FINAL:-ProxySecurePass123!}"
+
+# Create database configuration file for PHP
+cat > /var/www/html/.db_config << EOF
+DB_HOST=$$DB_ENDPOINT_FINAL
+DB_USER=admin
+DB_PASSWORD=$$DB_PASSWORD_FINAL
+DB_NAME=proxylamptodoapp
+DB_PORT=3306
+EOF
+
+# Set proper permissions for config file
+chown www-data:www-data /var/www/html/.db_config
+chmod 600 /var/www/html/.db_config
+
+# Also set as environment variables for this session
+export DB_HOST="$$DB_ENDPOINT_FINAL"
+export DB_USER="admin"
+export DB_PASSWORD="$$DB_PASSWORD_FINAL"
+export DB_NAME="proxylamptodoapp"
+export DB_PORT="3306"
+
+# Add to Apache environment
+cat >> /etc/apache2/envvars << EOF
+export DB_HOST="$$DB_ENDPOINT_FINAL"
+export DB_USER="admin"
+export DB_PASSWORD="$$DB_PASSWORD_FINAL"
+export DB_NAME="proxylamptodoapp"
+export DB_PORT="3306"
+EOF
+
+echo "Database configuration set - Host: $$DB_ENDPOINT_FINAL"
+
+#-------------------------------
+# 13. Configure CloudWatch Agent
 #-------------------------------
 # Create CloudWatch agent configuration directory
 mkdir -p /opt/aws/amazon-cloudwatch-agent/etc/
@@ -174,29 +267,29 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
 EOF
 
 #-------------------------------
-# 13. Create Custom Metrics Script
+# 14. Create Custom Metrics Script
 #-------------------------------
 cat > /usr/local/bin/custom-metrics.sh << 'EOF'
 #!/bin/bash
 # Custom metrics for CloudWatch
 
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+INSTANCE_ID=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
 
 # Apache connection metrics
-APACHE_CONNECTIONS=$(netstat -an | grep :80 | grep ESTABLISHED | wc -l)
-aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=ApacheConnections,Value=$APACHE_CONNECTIONS,Unit=Count,Dimensions=InstanceId=$INSTANCE_ID
+APACHE_CONNECTIONS=$$(netstat -an | grep :80 | grep ESTABLISHED | wc -l)
+aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=ApacheConnections,Value=$$APACHE_CONNECTIONS,Unit=Count,Dimensions=InstanceId=$$INSTANCE_ID
 
 # Disk usage metrics
-DISK_USAGE=$(df /var/www | tail -1 | awk '{print $5}' | sed 's/%//')
-aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=DiskUsagePercent,Value=$DISK_USAGE,Unit=Percent,Dimensions=InstanceId=$INSTANCE_ID
+DISK_USAGE=$$(df /var/www | tail -1 | awk '{print $$5}' | sed 's/%//')
+aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=DiskUsagePercent,Value=$$DISK_USAGE,Unit=Percent,Dimensions=InstanceId=$$INSTANCE_ID
 
 # Memory usage metrics
-MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.1f"), $3/$2 * 100.0}')
-aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=MemoryUsagePercent,Value=$MEMORY_USAGE,Unit=Percent,Dimensions=InstanceId=$INSTANCE_ID
+MEMORY_USAGE=$$(free | grep Mem | awk '{printf("%.1f"), $$3/$$2 * 100.0}')
+aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=MemoryUsagePercent,Value=$$MEMORY_USAGE,Unit=Percent,Dimensions=InstanceId=$$INSTANCE_ID
 
 # Apache status check
 if systemctl is-active --quiet apache2; then
@@ -204,14 +297,14 @@ if systemctl is-active --quiet apache2; then
 else
     APACHE_STATUS=0
 fi
-aws cloudwatch put-metric-data --region $REGION --namespace "ProxyLAMP/Application" \
-    --metric-data MetricName=ApacheStatus,Value=$APACHE_STATUS,Unit=Count,Dimensions=InstanceId=$INSTANCE_ID
+aws cloudwatch put-metric-data --region $$REGION --namespace "ProxyLAMP/Application" \
+    --metric-data MetricName=ApacheStatus,Value=$$APACHE_STATUS,Unit=Count,Dimensions=InstanceId=$$INSTANCE_ID
 EOF
 
 chmod +x /usr/local/bin/custom-metrics.sh
 
 #-------------------------------
-# 14. Configure Log Rotation
+# 15. Configure Log Rotation
 #-------------------------------
 cat > /etc/logrotate.d/proxy-lamp << 'EOF'
 /var/log/apache2/*.log {
@@ -229,7 +322,7 @@ cat > /etc/logrotate.d/proxy-lamp << 'EOF'
 EOF
 
 #-------------------------------
-# 15. Set up System Tuning for Load Balancer
+# 16. Set up System Tuning for Load Balancer
 #-------------------------------
 # Optimize kernel parameters for web server performance
 cat >> /etc/sysctl.conf << 'EOF'
@@ -246,7 +339,7 @@ EOF
 sysctl -p
 
 #-------------------------------
-# 16. Install and Configure Fail2Ban for Security
+# 17. Install and Configure Fail2Ban for Security
 #-------------------------------
 apt-get install -y fail2ban
 
@@ -276,13 +369,13 @@ systemctl enable fail2ban
 systemctl start fail2ban
 
 #-------------------------------
-# 17. Create Application Deployment Directory
+# 18. Create Application Deployment Directory
 #-------------------------------
 mkdir -p /tmp/app-deployment
 chown ubuntu:ubuntu /tmp/app-deployment
 
 #-------------------------------
-# 18. Final Setup and Verification
+# 19. Final Setup and Verification
 #-------------------------------
 # Enable Apache status module for monitoring
 a2enmod status
@@ -304,7 +397,7 @@ systemctl restart apache2
 systemctl is-active apache2 && echo "Apache is running" || echo "Apache failed to start"
 
 #-------------------------------
-# 19. Wait for Network Connectivity and Start CloudWatch Agent
+# 20. Wait for Network Connectivity and Start CloudWatch Agent
 #-------------------------------
 # Wait for network connectivity before starting CloudWatch agent
 sleep 30
@@ -316,10 +409,30 @@ sleep 30
 systemctl enable amazon-cloudwatch-agent
 
 #-------------------------------
-# 20. Completion Marker
+# 21. Test Database Connection
+#-------------------------------
+# Test database connection and create a simple test
+echo "Testing database connection..."
+if [ -n "$$DB_ENDPOINT_FINAL" ] && [ "$$DB_ENDPOINT_FINAL" != "proxy-lamp-mysql-endpoint" ]; then
+    # Wait for database to be available
+    for i in {1..30}; do
+        if mysql -h "$$DB_ENDPOINT_FINAL" -u admin -p"$${DB_PASSWORD_FINAL}" -e "SELECT 1;" 2>/dev/null; then
+            echo "Database connection successful!"
+            break
+        else
+            echo "Waiting for database... attempt $$i/30"
+            sleep 10
+        fi
+    done
+else
+    echo "Database endpoint not configured, will be set during deployment"
+fi
+
+#-------------------------------
+# 22. Completion Marker
 #-------------------------------
 echo "LAMP Stack installation completed!" >> /var/log/cloud-init-output.log
-echo "$(date): Proxy LAMP Stack setup completed" >> /var/log/setup.log
+echo "$$(date): Proxy LAMP Stack setup completed" >> /var/log/setup.log
 
 # Final system status
 echo "=== System Status ===" >> /var/log/setup.log

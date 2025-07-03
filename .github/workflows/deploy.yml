@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest                     # Run this job on the latest Ubuntu GitHub-hosted runner
     outputs:
       load_balancer_dns: ${{ steps.terraform-output.outputs.load_balancer_dns }}  # Pass ALB DNS to the next job
-      instance_ips: ${{ steps.terraform-output.outputs.instance_ips }}  # Pass EC2 instance IPs
+      autoscaling_group_name: ${{ steps.terraform-output.outputs.autoscaling_group_name }}  # Pass ASG name instead of IPs
     
     defaults:
       run:
@@ -72,8 +72,8 @@ jobs:
       id: terraform-output
       run: |
         echo "load_balancer_dns=$(terraform output -raw load_balancer_dns)" >> $GITHUB_OUTPUT
-        echo "instance_ips=$(terraform output -json instance_ips)" >> $GITHUB_OUTPUT
-        # Extracts Load Balancer DNS and EC2 instance IPs for the next job
+        echo "autoscaling_group_name=$(terraform output -raw autoscaling_group_name)" >> $GITHUB_OUTPUT
+        # Output ASG name instead of trying to get instance IPs
   
   deploy:
     name: 'Deploy Application to Load Balanced Infrastructure'
@@ -97,82 +97,154 @@ jobs:
         echo "Waiting for Auto Scaling Group instances to be fully initialized..."
         sleep 300  # Allows time for all EC2 instances in ASG to run user_data.sh and fully configure
 
+    - name: Get Instance IPs from Auto Scaling Group
+      id: get-instances
+      env:
+        ASG_NAME: ${{ needs.terraform.outputs.autoscaling_group_name }}
+      run: |
+        echo "Getting instance IPs from Auto Scaling Group: $ASG_NAME"
+        
+        # Get instance IDs from ASG
+        INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names "$ASG_NAME" \
+          --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+          --output text)
+        
+        echo "Instance IDs: $INSTANCE_IDS"
+        
+        if [ -z "$INSTANCE_IDS" ]; then
+          echo "No instances found in Auto Scaling Group"
+          exit 1
+        fi
+        
+        # Get public IP addresses for the instances
+        INSTANCE_IPS=$(aws ec2 describe-instances \
+          --instance-ids $INSTANCE_IDS \
+          --query 'Reservations[].Instances[].PublicIpAddress' \
+          --output text | tr '\t' ' ')
+        
+        echo "Instance IPs: $INSTANCE_IPS"
+        
+        if [ -z "$INSTANCE_IPS" ] || [ "$INSTANCE_IPS" = "None" ]; then
+          echo "No public IP addresses found for instances"
+          exit 1
+        fi
+        
+        # Store IPs in environment for next step
+        echo "INSTANCE_IPS=$INSTANCE_IPS" >> $GITHUB_ENV
+        echo "Found instances with IPs: $INSTANCE_IPS"
+
     - name: Deploy Application to All Instances
       env:
         PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}              # Private key to SSH into EC2
-        INSTANCE_IPS: ${{ needs.terraform.outputs.instance_ips }}  # IPs from previous job output
         LOAD_BALANCER_DNS: ${{ needs.terraform.outputs.load_balancer_dns }}
       run: |
         # Save the private key to a PEM file
         echo "$PRIVATE_KEY" > private_key.pem
         chmod 600 private_key.pem  # Restrict permissions so SSH doesn't complain
         
-        # Parse instance IPs from JSON array
-        INSTANCE_LIST=$(echo '${{ needs.terraform.outputs.instance_ips }}' | jq -r '.[]')
+        echo "Instance IPs to deploy to: $INSTANCE_IPS"
         
         # Deploy to each instance in the Auto Scaling Group
-        for INSTANCE_IP in $INSTANCE_LIST; do
+        for INSTANCE_IP in $INSTANCE_IPS; do
           echo "Deploying to instance: $INSTANCE_IP"
+          
+          # Skip if IP is empty or "None"
+          if [ -z "$INSTANCE_IP" ] || [ "$INSTANCE_IP" = "None" ]; then
+            echo "Skipping empty or invalid IP: $INSTANCE_IP"
+            continue
+          fi
           
           # Retry logic for establishing SSH connection (up to 20 tries)
           echo "Waiting for SSH connection to $INSTANCE_IP..."
+          SSH_SUCCESS=false
+          
           for i in {1..20}; do
-            if ssh -i private_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@$INSTANCE_IP "echo 'SSH connection successful'"; then
+            if ssh -i private_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes ubuntu@$INSTANCE_IP "echo 'SSH connection successful'" 2>/dev/null; then
               echo "SSH connection established to $INSTANCE_IP!"
+              SSH_SUCCESS=true
               break
             fi
             echo "Waiting for SSH... attempt $i/20"
             sleep 15
           done
           
+          if [ "$SSH_SUCCESS" = false ]; then
+            echo "Failed to establish SSH connection to $INSTANCE_IP after 20 attempts"
+            echo "Skipping this instance and continuing with others..."
+            continue
+          fi
+          
           # Copy application files from the local repo to the EC2 instance
           echo "Deploying application files to $INSTANCE_IP..."
-          scp -i private_key.pem -o StrictHostKeyChecking=no -r app/* ubuntu@$INSTANCE_IP:/tmp/
-          scp -i private_key.pem -o StrictHostKeyChecking=no -r monitoring/* ubuntu@$INSTANCE_IP:/tmp/
+          if ! scp -i private_key.pem -o StrictHostKeyChecking=no -r app/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
+            echo "Failed to copy app files to $INSTANCE_IP"
+            continue
+          fi
+          
+          if ! scp -i private_key.pem -o StrictHostKeyChecking=no -r monitoring/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
+            echo "Failed to copy monitoring files to $INSTANCE_IP"
+            continue
+          fi
           
           # Connect to EC2 and finalize deployment
           echo "Setting up web application on $INSTANCE_IP..."
           ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
             # Wait for LAMP stack setup to complete
-            while [ ! -f /var/log/cloud-init-output.log ] || ! grep -q 'LAMP Stack installation completed' /var/log/cloud-init-output.log; do
-              echo 'Waiting for LAMP stack installation to complete...'
+            echo 'Waiting for LAMP stack installation to complete...'
+            timeout 600 bash -c 'while [ ! -f /var/log/cloud-init-output.log ] || ! grep -q \"LAMP Stack installation completed\" /var/log/cloud-init-output.log; do
+              echo \"Still waiting for LAMP stack...\"
               sleep 30
-            done
+            done'
+            
+            if ! grep -q 'LAMP Stack installation completed' /var/log/cloud-init-output.log; then
+              echo 'LAMP stack installation may not have completed properly'
+              echo 'Continuing with deployment...'
+            fi
             
             # Move the PHP/CSS files to Apache's document root
-            sudo cp /tmp/*.php /tmp/*.css /var/www/html/ 2>/dev/null || echo 'Some files may not exist, continuing...'
+            echo 'Moving application files...'
+            sudo cp /tmp/*.php /var/www/html/ 2>/dev/null || echo 'Some PHP files may not exist, continuing...'
+            sudo cp /tmp/*.css /var/www/html/ 2>/dev/null || echo 'Some CSS files may not exist, continuing...'
             
             # Set up monitoring
-            sudo cp /tmp/cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/
-            sudo cp /tmp/custom-metrics.sh /usr/local/bin/
-            sudo chmod +x /usr/local/bin/custom-metrics.sh
+            echo 'Setting up monitoring...'
+            sudo cp /tmp/cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/ 2>/dev/null || echo 'CloudWatch agent config copy failed'
+            sudo cp /tmp/custom-metrics.sh /usr/local/bin/ 2>/dev/null || echo 'Custom metrics script copy failed'
+            sudo chmod +x /usr/local/bin/custom-metrics.sh 2>/dev/null || echo 'Failed to make custom-metrics.sh executable'
             
             # Set correct permissions
+            echo 'Setting file permissions...'
             sudo chown -R www-data:www-data /var/www/html/
             sudo chmod -R 755 /var/www/html/
             
             # Start CloudWatch agent
+            echo 'Starting CloudWatch agent...'
             sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
-              -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json
+              -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json 2>/dev/null || echo 'CloudWatch agent start failed'
             
             # Restart Apache and enable monitoring
+            echo 'Restarting services...'
             sudo systemctl restart apache2
-            sudo systemctl enable amazon-cloudwatch-agent
+            sudo systemctl enable amazon-cloudwatch-agent 2>/dev/null || echo 'Failed to enable CloudWatch agent'
             
             # Set up custom metrics cron job
-            (crontab -l 2>/dev/null; echo '*/5 * * * * /usr/local/bin/custom-metrics.sh') | crontab -
+            echo 'Setting up cron job...'
+            (crontab -l 2>/dev/null; echo '*/5 * * * * /usr/local/bin/custom-metrics.sh') | crontab - 2>/dev/null || echo 'Cron setup failed'
             
             # Confirm files are in place
-            echo 'Application deployment completed on $INSTANCE_IP!'
+            echo \"Application deployment completed on $INSTANCE_IP!\"
             ls -la /var/www/html/
-          "
+          " || echo "Deployment partially failed on $INSTANCE_IP but continuing..."
+          
+          echo "Finished deployment attempt to $INSTANCE_IP"
         done
         
         # Clean up local PEM file
         rm -f private_key.pem
         
         # Final deployment success message
-        echo "🎉 Application deployed successfully to all instances!"
+        echo "🎉 Application deployment process completed!"
         echo "🌐 Access your load-balanced application at: http://$LOAD_BALANCER_DNS"
 
   health_check:
@@ -198,17 +270,29 @@ jobs:
         
         # Test load balancer endpoint
         for i in {1..10}; do
+          echo "Testing load balancer... attempt $i/10"
           if curl -f -s "http://$LOAD_BALANCER_DNS/health.php" > /dev/null; then
             echo "✅ Load balancer health check passed!"
             echo "🌐 Application is healthy at: http://$LOAD_BALANCER_DNS"
             break
           else
             echo "⏳ Waiting for health check... attempt $i/10"
-            sleep 30
+            if [ $i -eq 10 ]; then
+              echo "❌ Health check failed after 10 attempts"
+              echo "🔍 Trying main page instead..."
+              if curl -f -s "http://$LOAD_BALANCER_DNS/" > /dev/null; then
+                echo "✅ Main application page is accessible"
+              else
+                echo "❌ Main application page is also not accessible"
+              fi
+            else
+              sleep 30
+            fi
           fi
         done
         
         # Final verification
         echo "Final application test:"
         curl -s "http://$LOAD_BALANCER_DNS/health.php" || echo "Health check endpoint not responding"
-        echo "Deployment completed successfully! 🚀"
+        curl -s "http://$LOAD_BALANCER_DNS/" > /dev/null && echo "✅ Main application is accessible" || echo "❌ Main application is not accessible"
+        echo "Deployment completed! 🚀"

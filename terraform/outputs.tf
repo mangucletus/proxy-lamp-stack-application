@@ -42,9 +42,16 @@ output "autoscaling_group_name" {
   value       = module.compute.autoscaling_group_name
 }
 
-output "instance_ips" {
-  description = "Public IP addresses of EC2 instances (check AWS console for actual IPs)"
-  value       = ["Check AWS EC2 console for instance IP addresses"]
+# FIXED: Remove placeholder instance IPs and provide instruction instead
+output "instance_access_info" {
+  description = "Information about accessing instances"
+  value = {
+    autoscaling_group_name = module.compute.autoscaling_group_name
+    ssh_key_name           = var.key_name
+    ssh_user               = "ubuntu"
+    note                   = "Use AWS CLI or console to get current instance IPs from the Auto Scaling Group"
+    aws_cli_command        = "aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names ${module.compute.autoscaling_group_name} --query 'AutoScalingGroups[0].Instances[].InstanceId' --output table"
+  }
 }
 
 #-------------------------------
@@ -112,9 +119,15 @@ output "cloudwatch_log_group_names" {
 #-------------------------------
 # SSH Connection Information
 #-------------------------------
-output "ssh_commands" {
-  description = "SSH commands to connect to instances"
-  value       = ["Use AWS EC2 console to get instance IP addresses, then: ssh -i your-private-key.pem ubuntu@INSTANCE_IP"]
+output "ssh_access_instructions" {
+  description = "Instructions for SSH access to instances"
+  value = {
+    step1    = "Get instance IPs: aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names ${module.compute.autoscaling_group_name} --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' --output text"
+    step2    = "Get public IPs: aws ec2 describe-instances --instance-ids <INSTANCE_IDS> --query 'Reservations[].Instances[].PublicIpAddress' --output text"
+    step3    = "SSH command: ssh -i your-private-key.pem ubuntu@<INSTANCE_IP>"
+    key_name = var.key_name
+    user     = "ubuntu"
+  }
 }
 
 #-------------------------------
@@ -129,7 +142,8 @@ output "deployment_summary" {
     health_check_url     = "http://${module.load_balancer.load_balancer_dns}/health.php"
     monitoring_dashboard = module.monitoring.dashboard_url
     deployment_timestamp = timestamp()
-    note                 = "Check AWS EC2 console for instance details"
+    autoscaling_group    = module.compute.autoscaling_group_name
+    note                 = "Instances are managed by Auto Scaling Group - use AWS CLI to get current instance details"
   }
   sensitive = true
 }

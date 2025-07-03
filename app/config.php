@@ -4,14 +4,30 @@
 // ----------------------------------------
 
 // Get database credentials from environment variables or use defaults
-$servername = getenv('DB_HOST') ?: "proxy-lamp-mysql-endpoint"; // Will be replaced by deployment script
+$servername = getenv('DB_HOST') ?: null;
 $username = getenv('DB_USER') ?: "admin";
-$password = getenv('DB_PASSWORD') ?: "ProxySecurePass123!";
+$password = getenv('DB_PASSWORD') ?: null;
 $dbname = getenv('DB_NAME') ?: "proxylamptodoapp";
 $port = getenv('DB_PORT') ?: 3306;
 
+// If environment variables are not set, try to read from instance metadata or config file
+if (!$servername || !$password) {
+    // Try to read from a config file created by user data script
+    $config_file = '/var/www/html/.db_config';
+    if (file_exists($config_file)) {
+        $config_data = parse_ini_file($config_file);
+        if ($config_data) {
+            $servername = $servername ?: ($config_data['DB_HOST'] ?? null);
+            $username = $config_data['DB_USER'] ?? $username;
+            $password = $password ?: ($config_data['DB_PASSWORD'] ?? null);
+            $dbname = $config_data['DB_NAME'] ?? $dbname;
+            $port = $config_data['DB_PORT'] ?? $port;
+        }
+    }
+}
+
 // Alternative: Get credentials from AWS Secrets Manager (more secure)
-if (function_exists('curl_init') && !getenv('DB_HOST')) {
+if (function_exists('curl_init') && (!$servername || !$password)) {
     try {
         // Get instance metadata token
         $token_url = 'http://169.254.169.254/latest/api/token';
@@ -36,12 +52,23 @@ if (function_exists('curl_init') && !getenv('DB_HOST')) {
             curl_close($ch);
 
             // Note: In production, you would use AWS SDK to get secrets from Secrets Manager
-            // For this demo, we'll use environment variables set by the user data script
+            // For this demo, we'll use the config file approach
         }
     } catch (Exception $e) {
-        // Fallback to environment variables if metadata service fails
+        // Fallback to config file if metadata service fails
         error_log("Failed to get AWS metadata: " . $e->getMessage());
     }
+}
+
+// Final fallback - check if we still don't have required values
+if (!$servername) {
+    error_log("ERROR: Database host not configured. Check environment variables or config file.");
+    die("Database configuration error. Please contact administrator.");
+}
+
+if (!$password) {
+    error_log("ERROR: Database password not configured. Check environment variables or config file.");
+    die("Database configuration error. Please contact administrator.");
 }
 
 // ----------------------------------------
@@ -61,9 +88,10 @@ $conn = new mysqli($servername, $username, $password, $dbname, $port);
 if ($conn->connect_error) {
     // Log the error for debugging (don't expose to users in production)
     error_log("Database connection failed: " . $conn->connect_error);
+    error_log("Connection details - Host: $servername, Port: $port, Database: $dbname, User: $username");
     
     // Show user-friendly error message
-    die("Database connection failed. Please try again later.");
+    die("Database connection failed. Please try again later or contact administrator.");
 }
 
 // ----------------------------------------
@@ -112,6 +140,8 @@ if ($table_check->num_rows == 0) {
     
     if (!$conn->query($create_table_sql)) {
         error_log("Error creating tasks table: " . $conn->error);
+    } else {
+        error_log("Tasks table created successfully");
     }
 }
 
@@ -248,4 +278,7 @@ function handleDatabaseError($errno, $errstr, $errfile, $errline) {
 }
 
 set_error_handler('handleDatabaseError', E_ERROR | E_WARNING);
+
+// Log successful connection for debugging
+error_log("Database connection successful - Host: $servername, Database: $dbname");
 ?>
