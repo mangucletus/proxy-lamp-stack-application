@@ -1,9 +1,11 @@
+# terraform/main.tf - CHECK THESE SECTIONS
+
 terraform {
-  required_version = ">= 1.0" # Ensure Terraform version compatibility
+  required_version = ">= 1.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0" # Use AWS provider v5.x
+      version = "~> 5.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -11,35 +13,34 @@ terraform {
     }
   }
   backend "s3" {
-    bucket = "proxy-lamp-stack-tfstate-cletusmangu-1749764" # Remote state storage bucket (UNCHANGED as requested)
-    key    = "proxy-lamp-stack/terraform.tfstate"           # Updated path to store the state file
-    region = "eu-central-1"                                 # Updated region
+    bucket = "proxy-lamp-stack-tfstate-cletusmangu-1749764"
+    key    = "proxy-lamp-stack/terraform.tfstate"
+    region = "eu-central-1"
   }
 }
 
 provider "aws" {
-  region = var.aws_region # Use variable for region flexibility
+  region = var.aws_region
 }
 
 provider "random" {}
 
-# Generate unique suffix for resource naming to avoid conflicts
+# Generate unique suffix for resource naming
 resource "random_id" "deployment_id" {
   byte_length = 4
 }
 
 locals {
-  # Unique naming convention for this deployment
   deployment_suffix = random_id.deployment_id.hex
   common_tags = {
-    Project     = "proxy-lamp-stack"
-    Environment = "production"
+    Project     = var.project_name
+    Environment = var.environment
     DeployedBy  = "terraform"
     Timestamp   = timestamp()
   }
 }
 
-# VPC Module - Network Infrastructure
+# VPC Module
 module "vpc" {
   source = "./modules/vpc"
 
@@ -48,7 +49,7 @@ module "vpc" {
   tags              = local.common_tags
 }
 
-# Security Module - Security Groups for different tiers
+# Security Module
 module "security" {
   source = "./modules/security"
 
@@ -59,7 +60,7 @@ module "security" {
   private_subnet_ids = module.vpc.private_subnet_ids
 }
 
-# Database Module - RDS MySQL for scalable database tier
+# Database Module
 module "database" {
   source = "./modules/database"
 
@@ -69,16 +70,10 @@ module "database" {
   db_password        = var.db_password
   deployment_suffix  = local.deployment_suffix
   tags               = local.common_tags
-
-  # FIXED: Explicitly disable features not supported by t3.micro
-  db_instance_class          = "db.t3.small"
-  db_storage_type            = "gp2" # More compatible than gp3
-  enable_deletion_protection = false
-  skip_final_snapshot        = true # For easier testing/cleanup
-  apply_immediately          = true # Apply changes immediately
+  db_instance_class  = var.db_instance_class
 }
 
-# Load Balancer Module - Application Load Balancer for high availability
+# Load Balancer Module
 module "load_balancer" {
   source = "./modules/load_balancer"
 
@@ -87,9 +82,16 @@ module "load_balancer" {
   alb_sg_id         = module.security.alb_sg_id
   deployment_suffix = local.deployment_suffix
   tags              = local.common_tags
+
+  # Health check variables
+  health_check_path     = var.health_check_path
+  health_check_interval = var.health_check_interval
+  health_check_timeout  = var.health_check_timeout
+  healthy_threshold     = var.healthy_threshold
+  unhealthy_threshold   = var.unhealthy_threshold
 }
 
-# Compute Module - Auto Scaling Group with EC2 instances
+# Compute Module
 module "compute" {
   source = "./modules/compute"
 
@@ -105,10 +107,15 @@ module "compute" {
   deployment_suffix = local.deployment_suffix
   tags              = local.common_tags
 
+  # Auto Scaling variables
+  min_size         = var.min_size
+  max_size         = var.max_size
+  desired_capacity = var.desired_capacity
+
   depends_on = [module.database]
 }
 
-# Monitoring Module - CloudWatch monitoring and observability
+# Monitoring Module
 module "monitoring" {
   source = "./modules/monitoring"
 
@@ -118,5 +125,4 @@ module "monitoring" {
   db_instance_identifier   = module.database.db_instance_identifier
   deployment_suffix        = local.deployment_suffix
   tags                     = local.common_tags
-
 }

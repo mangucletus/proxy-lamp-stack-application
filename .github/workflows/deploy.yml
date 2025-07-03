@@ -44,11 +44,28 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
+    # FIXED: Clean up any existing state issues
+    - name: Clean Terraform State
+      run: |
+        echo "Cleaning up potential state issues..."
+        rm -rf .terraform/
+        rm -f .terraform.lock.hcl
+        
+        # Format all files to ensure syntax is correct
+        terraform fmt -recursive .
+        echo "✅ Terraform files formatted"
+
     - name: Terraform Init
-      run: terraform init
+      run: |
+        echo "Initializing Terraform..."
+        terraform init -reconfigure
+        echo "✅ Terraform initialized"
 
     - name: Terraform Validate
-      run: terraform validate
+      run: |
+        echo "Validating Terraform configuration..."
+        terraform validate
+        echo "✅ Terraform configuration is valid"
 
     - name: Terraform Plan
       if: github.event_name == 'pull_request'
