@@ -204,15 +204,37 @@ jobs:
         
         echo "Instance IPs to deploy to: $INSTANCE_IPS"
         
-        # FIXED: Validate that INSTANCE_IPS is properly formatted
+        # Validate that INSTANCE_IPS is properly formatted
         if [ -z "$INSTANCE_IPS" ]; then
           echo "❌ No instance IPs available for deployment"
           exit 1
         fi
         
-        # FIXED: Check IP count
+        # Check IP count
         IP_COUNT=$(echo $INSTANCE_IPS | wc -w)
         echo "Number of IPs to deploy to: $IP_COUNT"
+        
+        # Check what files are available for deployment
+        echo "=== Checking available files for deployment ==="
+        echo "Current directory contents:"
+        ls -la
+        
+        echo "App directory contents:"
+        if [ -d "app" ]; then
+          ls -la app/
+        else
+          echo "❌ App directory not found!"
+          exit 1
+        fi
+        
+        echo "Monitoring directory contents:"
+        if [ -d "monitoring" ]; then
+          ls -la monitoring/
+          MONITORING_EXISTS=true
+        else
+          echo "⚠️ Monitoring directory not found - will skip monitoring setup"
+          MONITORING_EXISTS=false
+        fi
         
         SUCCESS_COUNT=0
         TOTAL_COUNT=0
@@ -231,7 +253,7 @@ jobs:
             continue
           fi
           
-          # FIXED: Additional IP validation
+          # Additional IP validation
           if ! [[ $INSTANCE_IP =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
             echo "❌ Invalid IP format: $INSTANCE_IP - skipping"
             continue
@@ -263,13 +285,24 @@ jobs:
             echo "❌ Failed to copy app files to $INSTANCE_IP"
             continue
           fi
+          echo "✅ App files copied successfully"
           
-          if ! scp -i private_key.pem -o StrictHostKeyChecking=no -r monitoring/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
-            echo "❌ Failed to copy monitoring files to $INSTANCE_IP"
-            continue
+          # Copy monitoring files only if they exist, and make it non-blocking
+          if [ "$MONITORING_EXISTS" = true ]; then
+            echo "Copying monitoring files to $INSTANCE_IP..."
+            if scp -i private_key.pem -o StrictHostKeyChecking=no -r monitoring/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
+              echo "✅ Monitoring files copied successfully"
+              MONITORING_DEPLOYED=true
+            else
+              echo "⚠️ Failed to copy monitoring files to $INSTANCE_IP (continuing anyway)"
+              MONITORING_DEPLOYED=false
+            fi
+          else
+            echo "⚠️ Skipping monitoring files (directory not found)"
+            MONITORING_DEPLOYED=false
           fi
           
-          # Deploy and configure application
+          # Deploy and configure application with ENHANCED ERROR HANDLING
           echo "Setting up web application on $INSTANCE_IP..."
           if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
             # Wait for LAMP stack setup to complete
@@ -279,38 +312,195 @@ jobs:
               sleep 15
             done'
             
+            # Check if Apache is currently running
+            echo 'Checking Apache status before deployment...'
+            sudo systemctl status apache2 --no-pager || echo 'Apache not running initially'
+            
+            # Backup existing Apache configuration
+            echo 'Creating backup of current Apache setup...'
+            sudo cp -r /var/www/html /var/www/html.backup.\$(date +%s) 2>/dev/null || echo 'No existing files to backup'
+            
             # Move the PHP/CSS files to Apache's document root
             echo 'Moving application files...'
-            sudo cp /tmp/*.php /var/www/html/ 2>/dev/null || echo 'Some PHP files may not exist, continuing...'
-            sudo cp /tmp/*.css /var/www/html/ 2>/dev/null || echo 'Some CSS files may not exist, continuing...'
+            sudo cp /tmp/*.php /var/www/html/ 2>/dev/null && echo 'PHP files copied' || echo 'No PHP files to copy'
+            sudo cp /tmp/*.css /var/www/html/ 2>/dev/null && echo 'CSS files copied' || echo 'No CSS files to copy'
             
-            # Set up monitoring
-            echo 'Setting up monitoring...'
-            sudo cp /tmp/cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/ 2>/dev/null || echo 'CloudWatch agent config copy failed'
-            sudo cp /tmp/custom-metrics.sh /usr/local/bin/ 2>/dev/null || echo 'Custom metrics script copy failed'
-            sudo chmod +x /usr/local/bin/custom-metrics.sh 2>/dev/null || echo 'Failed to make custom-metrics.sh executable'
-            
-            # Set correct permissions
+            # CRITICAL FIX: Set correct permissions BEFORE syntax check
             echo 'Setting file permissions...'
             sudo chown -R www-data:www-data /var/www/html/
-            sudo chmod -R 755 /var/www/html/
+            sudo chmod 755 /var/www/html/
+            sudo chmod 644 /var/www/html/*.php 2>/dev/null || echo 'No PHP files to set permissions'
+            sudo chmod 644 /var/www/html/*.css 2>/dev/null || echo 'No CSS files to set permissions'
             
-            # Restart Apache
-            echo 'Restarting services...'
-            sudo systemctl restart apache2
+            # ADDED: Validate PHP syntax before proceeding
+            echo 'Validating PHP syntax...'
+            PHP_SYNTAX_OK=true
+            for phpfile in /var/www/html/*.php; do
+              if [ -f \"\$phpfile\" ]; then
+                if ! php -l \"\$phpfile\" >/dev/null 2>&1; then
+                  echo \"❌ PHP syntax error in \$phpfile:\"
+                  php -l \"\$phpfile\" || true
+                  PHP_SYNTAX_OK=false
+                fi
+              fi
+            done
             
-            # Test web server
-            echo 'Testing web server...'
-            curl -s http://localhost/health.php > /dev/null && echo 'Web server is responding' || echo 'Web server test failed'
+            if [ \"\$PHP_SYNTAX_OK\" = \"true\" ]; then
+              echo '✅ All PHP files have valid syntax'
+            else
+              echo '❌ PHP syntax errors found - cannot proceed with deployment'
+              exit 1
+            fi
+            
+            # Set up monitoring only if files were successfully copied
+            if [ '$MONITORING_DEPLOYED' = true ]; then
+              echo 'Setting up monitoring...'
+              sudo cp /tmp/cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/ 2>/dev/null || echo 'CloudWatch agent config copy failed'
+              sudo cp /tmp/custom-metrics.sh /usr/local/bin/ 2>/dev/null || echo 'Custom metrics script copy failed'
+              sudo chmod +x /usr/local/bin/custom-metrics.sh 2>/dev/null || echo 'Failed to make custom-metrics.sh executable'
+              
+              # Restart CloudWatch agent if config was updated
+              sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+                -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json 2>/dev/null || echo 'CloudWatch agent restart failed'
+            else
+              echo 'Skipping monitoring setup (files not available)'
+            fi
+            
+            # ADDED: Test Apache configuration before restart
+            echo 'Testing Apache configuration...'
+            if ! sudo apache2ctl configtest 2>/dev/null; then
+              echo '❌ Apache configuration test failed:'
+              sudo apache2ctl configtest 2>&1 || true
+              echo 'This usually indicates a PHP or module configuration issue.'
+              exit 1
+            fi
+            echo '✅ Apache configuration is valid'
+            
+            # Restart Apache with better error handling
+            echo 'Restarting Apache...'
+            if sudo systemctl restart apache2; then
+              echo '✅ Apache restarted successfully'
+            else
+              echo '❌ Apache restart failed - checking logs...'
+              sudo systemctl status apache2 --no-pager || true
+              echo '--- Last 20 lines of Apache error log ---'
+              sudo tail -20 /var/log/apache2/error.log || true
+              echo '--- Checking for Apache processes ---'
+              ps aux | grep apache2 || true
+              
+              # Try to start Apache manually for better error output
+              echo 'Attempting manual Apache start...'
+              sudo apache2ctl start 2>&1 || true
+              exit 1
+            fi
+            
+            # Wait a moment for Apache to fully start
+            sleep 5
+            
+            # ENHANCED: Multiple health checks
+            echo 'Testing web server health...'
+            
+            # Test 1: Check if Apache process is running
+            if pgrep apache2 > /dev/null; then
+              echo '✅ Apache processes are running'
+            else
+              echo '❌ Apache processes not found'
+              ps aux | grep apache2 || true
+              exit 1
+            fi
+            
+            # Test 2: Check if Apache is listening on port 80
+            if netstat -tlnp | grep ':80 ' > /dev/null; then
+              echo '✅ Apache is listening on port 80'
+            else
+              echo '❌ Apache is not listening on port 80'
+              echo 'Checking what is listening:'
+              sudo netstat -tlnp | grep ':80' || echo 'Nothing listening on port 80'
+              exit 1
+            fi
+            
+            # Test 3: Test local HTTP connectivity with retries
+            echo 'Testing local HTTP connectivity...'
+            HTTP_SUCCESS=false
+            for attempt in {1..10}; do
+              if curl -s -m 5 http://localhost/ > /dev/null; then
+                echo \"✅ Local HTTP test passed (attempt \$attempt)\"
+                HTTP_SUCCESS=true
+                break
+              else
+                echo \"⏳ Local HTTP test failed, attempt \$attempt/10\"
+                sleep 2
+              fi
+            done
+            
+            if [ \"\$HTTP_SUCCESS\" != \"true\" ]; then
+              echo '❌ Local HTTP connectivity failed after 10 attempts'
+              
+              # Debug information
+              echo '=== DEBUGGING INFORMATION ==='
+              echo '--- Apache Status ---'
+              sudo systemctl status apache2 --no-pager || true
+              echo '--- Apache Error Log (last 30 lines) ---'
+              sudo tail -30 /var/log/apache2/error.log || true
+              echo '--- Apache Access Log (last 10 lines) ---'
+              sudo tail -10 /var/log/apache2/access.log || true
+              echo '--- Files in /var/www/html ---'
+              ls -la /var/www/html/ || true
+              echo '--- Apache Configuration Test ---'
+              sudo apache2ctl configtest || true
+              echo '--- Network Connections ---'
+              sudo netstat -tlnp || true
+              
+              exit 1
+            fi
+            
+            # Test 4: Test health.php specifically
+            if curl -s -m 5 http://localhost/health.php | grep -q 'healthy\\|status' 2>/dev/null; then
+              echo '✅ Health check endpoint working'
+            else
+              echo '⚠️ Health check endpoint not working, testing index.php...'
+              if curl -s -m 5 http://localhost/index.php > /dev/null; then
+                echo '✅ Index page working'
+              else
+                echo '❌ Index page also not working'
+                echo 'Raw response from localhost:'
+                curl -v -m 10 http://localhost/ 2>&1 || true
+                exit 1
+              fi
+            fi
             
             # Confirm files are in place
-            echo \"Application deployment completed on $INSTANCE_IP!\"
+            echo \"✅ Application deployment completed successfully on $INSTANCE_IP!\"
+            echo \"Files in /var/www/html/:\"
             ls -la /var/www/html/
+            
+            echo '=== FINAL STATUS CHECK ==='
+            sudo systemctl is-active apache2 && echo 'Apache is active' || echo 'Apache is not active'
+            ps aux | grep apache2 | grep -v grep | wc -l | xargs echo 'Apache processes:'
+            
           "; then
             echo "✅ Successfully deployed to $INSTANCE_IP"
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
           else
             echo "❌ Deployment failed on $INSTANCE_IP"
+            
+            # Get debug information on failure
+            echo "=== DEBUGGING FAILED DEPLOYMENT ==="
+            ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
+              echo 'Apache status:'
+              sudo systemctl status apache2 --no-pager || true
+              echo 'Apache error log (last 20 lines):'
+              sudo tail -20 /var/log/apache2/error.log || true
+              echo 'Files in /var/www/html:'
+              ls -la /var/www/html/ || true
+              echo 'PHP syntax check:'
+              for phpfile in /var/www/html/*.php; do
+                if [ -f \"\$phpfile\" ]; then
+                  echo \"Checking \$phpfile:\"
+                  php -l \"\$phpfile\" || true
+                fi
+              done
+            " || echo "Could not retrieve debug information"
           fi
           
           echo "Finished deployment attempt to $INSTANCE_IP"
@@ -330,6 +520,9 @@ jobs:
         if [ $SUCCESS_COUNT -gt 0 ]; then
           echo "🎉 Application deployed successfully to $SUCCESS_COUNT instance(s)!"
           echo "🌐 Access your load-balanced application at: http://$LOAD_BALANCER_DNS"
+          if [ "$MONITORING_EXISTS" = false ]; then
+            echo "⚠️ Note: Monitoring setup was skipped due to missing files"
+          fi
         else
           echo "❌ All deployments failed!"
           exit 1
@@ -356,23 +549,39 @@ jobs:
         echo "Waiting for load balancer health checks to pass..."
         sleep 180
         
-        # Test load balancer endpoint
-        for i in {1..10}; do
-          echo "Testing load balancer... attempt $i/10"
-          if curl -f -s "http://$LOAD_BALANCER_DNS/health.php" > /dev/null; then
+        # Test load balancer endpoint with more attempts
+        for i in {1..15}; do
+          echo "Testing load balancer... attempt $i/15"
+          if curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/health.php" > /dev/null; then
             echo "✅ Load balancer health check passed!"
             echo "🌐 Application is healthy at: http://$LOAD_BALANCER_DNS"
             break
+          elif curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/" > /dev/null; then
+            echo "✅ Main application page is accessible!"
+            echo "🌐 Application is accessible at: http://$LOAD_BALANCER_DNS"
+            break
           else
-            echo "⏳ Waiting for health check... attempt $i/10"
-            if [ $i -eq 10 ]; then
-              echo "❌ Health check failed after 10 attempts"
-              echo "🔍 Trying main page instead..."
-              if curl -f -s "http://$LOAD_BALANCER_DNS/" > /dev/null; then
-                echo "✅ Main application page is accessible"
+            echo "⏳ Waiting for health check... attempt $i/15"
+            if [ $i -eq 15 ]; then
+              echo "❌ Health check failed after 15 attempts"
+              echo "🔍 Let's check what's available..."
+              
+              # Try to get more information about the failure
+              echo "Load balancer DNS: $LOAD_BALANCER_DNS"
+              
+              # Test basic connectivity
+              if ping -c 3 "$LOAD_BALANCER_DNS" > /dev/null 2>&1; then
+                echo "✅ Load balancer DNS resolves and is reachable"
               else
-                echo "❌ Main application page is also not accessible"
+                echo "❌ Load balancer DNS does not resolve or is not reachable"
               fi
+              
+              # Try HTTP request with more details
+              echo "Detailed HTTP test:"
+              curl -v -m 15 "http://$LOAD_BALANCER_DNS/" || echo "Detailed HTTP test failed"
+              
+              echo "⚠️ Application may be accessible but health checks are failing"
+              echo "🌐 Try accessing: http://$LOAD_BALANCER_DNS"
             else
               sleep 30
             fi
@@ -380,3 +589,8 @@ jobs:
         done
         
         echo "Deployment completed! 🚀"
+        echo ""
+        echo "=== FINAL DEPLOYMENT STATUS ==="
+        echo "🌐 Application URL: http://$LOAD_BALANCER_DNS"
+        echo "🔍 Health Check: http://$LOAD_BALANCER_DNS/health.php"
+        echo "📊 AWS Console: https://console.aws.amazon.com/ec2/home?region=${{ env.AWS_REGION }}"
