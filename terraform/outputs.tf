@@ -164,7 +164,7 @@ output "terraform_state_bucket" {
   description = "S3 bucket storing Terraform state"
   value       = "proxy-lamp-stack-tfstate-cletusmangu-1749764"
 }
-
+#output the deployment id 
 output "deployment_id" {
   description = "Unique deployment identifier"
   value       = random_id.deployment_id.hex

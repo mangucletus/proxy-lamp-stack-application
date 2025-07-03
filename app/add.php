@@ -1,3 +1,5 @@
+<!-- add to do list -->
+
 <?php
 // Include the database configuration file which contains connection details
 include 'config.php';
