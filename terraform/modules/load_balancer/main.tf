@@ -324,7 +324,7 @@ resource "aws_wafv2_web_acl" "proxy_lamp_waf" {
   }
 }
 
-# Associate WAF with ALB
+# Associate WAF with ALB (APplication Load Balancer)
 resource "aws_wafv2_web_acl_association" "proxy_lamp_waf_association" {
   count = var.enable_waf ? 1 : 0
   
