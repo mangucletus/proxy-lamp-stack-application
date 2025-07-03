@@ -1,4 +1,4 @@
-# 🚀 Proxy LAMP Stack To-Do Application with Load Balancer & Monitoring
+# Proxy LAMP Stack To-Do Application with Load Balancer & Monitoring
 
 [![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
 [![Terraform](https://img.shields.io/badge/Terraform-623CE4?style=for-the-badge&logo=terraform&logoColor=white)](https://www.terraform.io/)
@@ -7,100 +7,100 @@
 [![Apache](https://img.shields.io/badge/Apache-D22128?style=for-the-badge&logo=apache&logoColor=white)](https://httpd.apache.org/)
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/features/actions)
 
-## 🌐 **Live Application**
-**🔗 [Access the Load-Balanced To-Do App](http://your-load-balancer-dns/)**
+## Live Application
+**Access the Load-Balanced To-Do App: http://your-load-balancer-dns/**
 
 > A production-ready, highly available LAMP stack application deployed on AWS with Application Load Balancer, Auto Scaling, RDS MySQL, comprehensive monitoring, logging, and observability using Infrastructure as Code (IaC) with Terraform and automated CI/CD with GitHub Actions.
 
 ---
 
-## 📋 **Table of Contents**
+## Table of Contents
 
-- [🎯 Project Overview](#-project-overview)
-- [🏗️ Architecture](#️-architecture)
-- [✨ Features](#-features)
-- [🛠️ Technology Stack](#️-technology-stack)
-- [📁 Project Structure](#-project-structure)
-- [📋 Prerequisites](#-prerequisites)
-- [🚀 Quick Start](#-quick-start)
-- [📖 Detailed Setup Guide](#-detailed-setup-guide)
-- [🔄 Deployment Workflow](#-deployment-workflow)
-- [💻 Application Features](#-application-features)
-- [🔒 Security Implementation](#-security-implementation)
-- [📊 Monitoring & Observability](#-monitoring--observability)
-- [🔍 Health Checks](#-health-checks)
-- [⚖️ Load Balancing](#️-load-balancing)
-- [📈 Auto Scaling](#-auto-scaling)
-- [🗄️ Database Management](#️-database-management)
-- [📝 Logging Strategy](#-logging-strategy)
-- [🎛️ Configuration](#️-configuration)
-- [🔧 Troubleshooting](#-troubleshooting)
-- [🧹 Cleanup](#-cleanup)
+- [Project Overview](#project-overview)
+- [Architecture](#architecture)
+- [Features](#features)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Detailed Setup Guide](#detailed-setup-guide)
+- [Deployment Workflow](#deployment-workflow)
+- [Application Features](#application-features)
+- [Security Implementation](#security-implementation)
+- [Monitoring & Observability](#monitoring--observability)
+- [Health Checks](#health-checks)
+- [Load Balancing](#load-balancing)
+- [Auto Scaling](#auto-scaling)
+- [Database Management](#database-management)
+- [Logging Strategy](#logging-strategy)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+- [Cleanup](#cleanup)
 
 ---
 
-## 🎯 **Project Overview**
+## Project Overview
 
 This project demonstrates a complete **enterprise-grade DevOps workflow** for deploying a modern, highly available LAMP stack application on AWS. It showcases Infrastructure as Code (IaC) principles, automated CI/CD pipelines, comprehensive monitoring, and AWS cloud best practices with a focus on **high availability, scalability, and observability**.
 
-### **What This Project Demonstrates:**
-- 🏗️ **Infrastructure as Code** with modular Terraform
-- 🔄 **Automated CI/CD** with GitHub Actions
-- ⚖️ **Load Balancing** with Application Load Balancer (ALB)
-- 📈 **Auto Scaling** based on demand
-- 🗄️ **Managed Database** with RDS MySQL
-- 📊 **Comprehensive Monitoring** with CloudWatch, Application Insights
-- 📝 **Centralized Logging** with structured log analysis
-- 🔒 **Security Best Practices** with VPC, Security Groups, WAF
-- 🔍 **Health Checks** and automated recovery
-- 🌐 **Multi-AZ Deployment** for high availability
+### What This Project Demonstrates:
+- **Infrastructure as Code** with modular Terraform
+- **Automated CI/CD** with GitHub Actions
+- **Load Balancing** with Application Load Balancer (ALB)
+- **Auto Scaling** based on demand
+- **Managed Database** with RDS MySQL
+- **Comprehensive Monitoring** with CloudWatch, Application Insights
+- **Centralized Logging** with structured log analysis
+- **Security Best Practices** with VPC, Security Groups, WAF
+- **Health Checks** and automated recovery
+- **Multi-AZ Deployment** for high availability
 
 ---
 
-## 🏗️ **Architecture**
+## Architecture
 
-### **High-Level Architecture Diagram**
+### High-Level Architecture Diagram
 
 ```mermaid
 graph TB
-    subgraph "Internet"
-        Users[👥 Users]
+    subgraph "Internet Gateway"
+        Users[Users]
     end
     
     subgraph "AWS Cloud - eu-central-1"
         subgraph "VPC: 10.0.0.0/16"
             subgraph "Public Subnets (Multi-AZ)"
-                ALB[🔄 Application Load Balancer<br/>proxy-lamp-alb]
-                NAT1[🌐 NAT Gateway AZ-1]
-                NAT2[🌐 NAT Gateway AZ-2]
+                ALB[Application Load Balancer<br/>proxy-lamp-alb]
+                NAT1[NAT Gateway AZ-1]
+                NAT2[NAT Gateway AZ-2]
             end
             
             subgraph "Private Subnets (Multi-AZ)"
-                ASG[📈 Auto Scaling Group<br/>2-6 instances]
-                EC2A[🖥️ EC2 Instance A<br/>t3.micro]
-                EC2B[🖥️ EC2 Instance B<br/>t3.micro]
-                EC2C[🖥️ EC2 Instance C<br/>t3.micro]
+                ASG[Auto Scaling Group<br/>2-6 instances]
+                EC2A[EC2 Instance A<br/>t3.micro]
+                EC2B[EC2 Instance B<br/>t3.micro]
+                EC2C[EC2 Instance C<br/>t3.micro]
                 
-                RDS[(🗄️ RDS MySQL 8.0<br/>Multi-AZ)]
+                RDS[(RDS MySQL 8.0<br/>Multi-AZ)]
             end
             
-            IGW[🌉 Internet Gateway]
-            SG1[🔒 ALB Security Group]
-            SG2[🔒 Web Security Group]
-            SG3[🔒 DB Security Group]
+            IGW[Internet Gateway]
+            SG1[ALB Security Group]
+            SG2[Web Security Group]
+            SG3[DB Security Group]
         end
         
         subgraph "Monitoring & Logging"
-            CW[📊 CloudWatch Dashboard]
-            AI[🔍 Application Insights]
-            SNS[📧 SNS Alerts]
-            S3[🪣 S3 ALB Logs]
+            CW[CloudWatch Dashboard]
+            AI[Application Insights]
+            SNS[SNS Alerts]
+            S3[S3 ALB Logs]
         end
         
         subgraph "DevOps Pipeline"
-            GHA[⚡ GitHub Actions]
-            TF[🏗️ Terraform State]
-            SM[🔐 Secrets Manager]
+            GHA[GitHub Actions]
+            TF[Terraform State]
+            SM[Secrets Manager]
         end
     end
 
@@ -122,151 +122,173 @@ graph TB
     RDS -.-> CW
     CW -.-> SNS
     
-    style Users fill:#e1f5fe
-    style ALB fill:#f3e5f5
-    style ASG fill:#e8f5e8
-    style RDS fill:#fff8e1
-    style CW fill:#e3f2fd
+    classDef userClass fill:#e3f2fd,stroke:#1976d2,stroke-width:3px,color:#000
+    classDef albClass fill:#fff3e0,stroke:#f57c00,stroke-width:3px,color:#000
+    classDef asgClass fill:#e8f5e8,stroke:#388e3c,stroke-width:3px,color:#000
+    classDef rdsClass fill:#fff8e1,stroke:#ffa000,stroke-width:3px,color:#000
+    classDef monitorClass fill:#f3e5f5,stroke:#8e24aa,stroke-width:3px,color:#000
+    classDef pipelineClass fill:#ffebee,stroke:#d32f2f,stroke-width:3px,color:#000
+    classDef securityClass fill:#e0f2f1,stroke:#00695c,stroke-width:3px,color:#000
+    
+    class Users userClass
+    class ALB albClass
+    class ASG,EC2A,EC2B,EC2C asgClass
+    class RDS rdsClass
+    class CW,AI,SNS,S3 monitorClass
+    class GHA,TF,SM pipelineClass
+    class SG1,SG2,SG3 securityClass
 ```
 
-### **Network Architecture**
+### Network Architecture
 
 ```mermaid
 graph TB
-    Internet[🌐 Internet] --> IGW[🌉 Internet Gateway]
+    Internet[Internet] --> IGW[Internet Gateway]
     
-    IGW --> VPC[🏗️ VPC: proxy-lamp-vpc<br/>10.0.0.0/16]
+    IGW --> VPC[VPC: proxy-lamp-vpc<br/>10.0.0.0/16]
     
-    VPC --> PubSub1[📦 Public Subnet 1<br/>10.0.1.0/24<br/>eu-central-1a]
-    VPC --> PubSub2[📦 Public Subnet 2<br/>10.0.2.0/24<br/>eu-central-1b]
+    VPC --> PubSub1[Public Subnet 1<br/>10.0.1.0/24<br/>eu-central-1a]
+    VPC --> PubSub2[Public Subnet 2<br/>10.0.2.0/24<br/>eu-central-1b]
     
-    VPC --> PrivSub1[🔒 Private Subnet 1<br/>10.0.10.0/24<br/>eu-central-1a]
-    VPC --> PrivSub2[🔒 Private Subnet 2<br/>10.0.11.0/24<br/>eu-central-1b]
+    VPC --> PrivSub1[Private Subnet 1<br/>10.0.10.0/24<br/>eu-central-1a]
+    VPC --> PrivSub2[Private Subnet 2<br/>10.0.11.0/24<br/>eu-central-1b]
     
-    PubSub1 --> ALB[⚖️ Application Load Balancer]
+    PubSub1 --> ALB[Application Load Balancer]
     PubSub2 --> ALB
     
-    PubSub1 --> NAT1[🌐 NAT Gateway 1]
-    PubSub2 --> NAT2[🌐 NAT Gateway 2]
+    PubSub1 --> NAT1[NAT Gateway 1]
+    PubSub2 --> NAT2[NAT Gateway 2]
     
-    PrivSub1 --> EC2_1[🖥️ Web Servers AZ-1]
-    PrivSub2 --> EC2_2[🖥️ Web Servers AZ-2]
+    PrivSub1 --> EC2_1[Web Servers AZ-1]
+    PrivSub2 --> EC2_2[Web Servers AZ-2]
     
-    PrivSub1 --> RDS[🗄️ RDS MySQL<br/>Multi-AZ]
+    PrivSub1 --> RDS[RDS MySQL<br/>Multi-AZ]
     PrivSub2 --> RDS
     
     EC2_1 --> NAT1
     EC2_2 --> NAT2
     
-    classDef internetClass fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef vpcClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    classDef publicClass fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef privateClass fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    classDef internetClass fill:#1976d2,stroke:#0d47a1,stroke-width:4px,color:#fff
+    classDef vpcClass fill:#ff8f00,stroke:#e65100,stroke-width:4px,color:#fff
+    classDef publicClass fill:#388e3c,stroke:#1b5e20,stroke-width:4px,color:#fff
+    classDef privateClass fill:#d32f2f,stroke:#b71c1c,stroke-width:4px,color:#fff
+    classDef dbClass fill:#7b1fa2,stroke:#4a148c,stroke-width:4px,color:#fff
     
     class Internet,IGW internetClass
     class VPC vpcClass
     class PubSub1,PubSub2,ALB,NAT1,NAT2 publicClass
-    class PrivSub1,PrivSub2,EC2_1,EC2_2,RDS privateClass
+    class PrivSub1,PrivSub2,EC2_1,EC2_2 privateClass
+    class RDS dbClass
 ```
 
-### **Data Flow Diagram**
+### Data Flow Diagram
 
 ```mermaid
 sequenceDiagram
-    participant User as 👤 User
-    participant ALB as ⚖️ Load Balancer
-    participant EC2 as 🖥️ Web Server
-    participant RDS as 🗄️ Database
-    participant CW as 📊 CloudWatch
-    participant SNS as 📧 Alerts
+    participant User as User Browser
+    participant ALB as Load Balancer
+    participant EC2 as Web Server
+    participant RDS as MySQL Database
+    participant CW as CloudWatch
+    participant SNS as Alert System
 
-    User->>ALB: HTTP Request
-    ALB->>ALB: Health Check
+    User->>ALB: HTTP Request (Port 80/443)
+    ALB->>ALB: Health Check Validation
     ALB->>EC2: Route to Healthy Instance
-    EC2->>RDS: Database Query
+    EC2->>RDS: Database Query (Port 3306)
     RDS-->>EC2: Query Results
     EC2->>EC2: Process PHP Logic
     EC2-->>ALB: HTTP Response
     ALB-->>User: Final Response
     
-    EC2->>CW: Send Metrics
-    RDS->>CW: Send DB Metrics
-    ALB->>CW: Send LB Metrics
-    CW->>SNS: Trigger Alerts (if needed)
-    SNS-->>User: Email/SMS Alert
+    EC2->>CW: Send Performance Metrics
+    RDS->>CW: Send Database Metrics
+    ALB->>CW: Send Load Balancer Metrics
+    CW->>SNS: Trigger Alerts (if thresholds exceeded)
+    SNS-->>User: Email/SMS Notification
+    
+    Note over User,SNS: Complete Request-Response Cycle with Monitoring
 ```
 
-### **Auto Scaling Flow**
+### Auto Scaling Flow
 
 ```mermaid
 flowchart TD
-    A[📊 CloudWatch Monitors CPU] --> B{CPU > 70%?}
-    B -->|Yes| C[📈 Scale Up Policy]
-    B -->|No| D{CPU < 30%?}
+    A[CloudWatch Monitors CPU Utilization] --> B{CPU Usage > 70%?}
+    B -->|Yes| C[Scale Up Policy Triggered]
+    B -->|No| D{CPU Usage < 30%?}
     
-    C --> E[🚀 Launch New Instance]
-    E --> F[⏳ Instance Warmup 5min]
-    F --> G[✅ Add to Target Group]
-    G --> H[⚖️ Load Balancer Routes Traffic]
+    C --> E[Launch New EC2 Instance]
+    E --> F[Instance Warmup Period - 5 minutes]
+    F --> G[Health Check Validation]
+    G --> H[Add to Target Group]
+    H --> I[Load Balancer Routes Traffic]
     
-    D -->|Yes| I[📉 Scale Down Policy]
-    D -->|No| J[😴 No Action]
+    D -->|Yes| J[Scale Down Policy Triggered]
+    D -->|No| K[No Scaling Action Required]
     
-    I --> K[🔄 Terminate Instance]
-    K --> L[⚖️ Redistribute Traffic]
+    J --> L[Gracefully Terminate Instance]
+    L --> M[Redistribute Existing Traffic]
     
-    H --> M[📊 Continue Monitoring]
-    L --> M
-    J --> M
-    M --> A
+    I --> N[Continue Monitoring Metrics]
+    M --> N
+    K --> N
+    N --> A
     
-    style A fill:#e3f2fd
-    style C fill:#e8f5e8
-    style I fill:#ffebee
-    style M fill:#f3e5f5
+    classDef monitorClass fill:#2196f3,stroke:#0d47a1,stroke-width:3px,color:#fff
+    classDef scaleUpClass fill:#4caf50,stroke:#1b5e20,stroke-width:3px,color:#fff
+    classDef scaleDownClass fill:#f44336,stroke:#b71c1c,stroke-width:3px,color:#fff
+    classDef neutralClass fill:#9c27b0,stroke:#4a148c,stroke-width:3px,color:#fff
+    classDef actionClass fill:#ff9800,stroke:#e65100,stroke-width:3px,color:#fff
+    
+    class A,N monitorClass
+    class C,E,F,G,H,I scaleUpClass
+    class J,L,M scaleDownClass
+    class K neutralClass
+    class B,D actionClass
 ```
 
 ---
 
-## ✨ **Features**
+## Features
 
-### **🏗️ Infrastructure Features**
-- ⚖️ **Application Load Balancer** with SSL termination support
-- 📈 **Auto Scaling Group** (2-6 instances) with multiple policies
-- 🗄️ **RDS MySQL** with Multi-AZ deployment option
-- 🌐 **Multi-AZ Architecture** for high availability
-- 🔒 **VPC with Public/Private Subnets** for security isolation
-- 🛡️ **WAF Integration** for additional security (optional)
+### Infrastructure Features
+- **Application Load Balancer** with SSL termination support
+- **Auto Scaling Group** (2-6 instances) with multiple policies
+- **RDS MySQL** with Multi-AZ deployment option
+- **Multi-AZ Architecture** for high availability
+- **VPC with Public/Private Subnets** for security isolation
+- **WAF Integration** for additional security (optional)
 
-### **📊 Monitoring & Observability**
-- 📊 **CloudWatch Dashboard** with comprehensive metrics
-- 🔍 **Application Insights** for automated monitoring
-- 📝 **Centralized Logging** with structured log analysis
-- 🚨 **Smart Alerting** with composite alarms
-- 📈 **Anomaly Detection** for proactive monitoring
-- 📋 **Custom Metrics** for application-specific KPIs
+### Monitoring & Observability
+- **CloudWatch Dashboard** with comprehensive metrics
+- **Application Insights** for automated monitoring
+- **Centralized Logging** with structured log analysis
+- **Smart Alerting** with composite alarms
+- **Anomaly Detection** for proactive monitoring
+- **Custom Metrics** for application-specific KPIs
 
-### **🔒 Security Features**
-- 🔐 **Network Isolation** with VPC and Security Groups
-- 🛡️ **Multi-Layer Security** (NACLs + Security Groups)
-- 🔑 **IAM Roles** with least privilege access
-- 🔒 **Encryption** at rest and in transit
-- 🔐 **Secrets Management** with AWS Secrets Manager
-- 🛡️ **SQL Injection Protection** with prepared statements
+### Security Features
+- **Network Isolation** with VPC and Security Groups
+- **Multi-Layer Security** (NACLs + Security Groups)
+- **IAM Roles** with least privilege access
+- **Encryption** at rest and in transit
+- **Secrets Management** with AWS Secrets Manager
+- **SQL Injection Protection** with prepared statements
 
-### **💻 Application Features**
-- ➕ **Add Tasks** with real-time updates
-- 🗑️ **Delete Tasks** with confirmation
-- 📱 **Responsive Design** optimized for all devices
-- 🎨 **Modern UI** with updated color scheme
-- ⚡ **High Performance** with optimized database queries
-- 🔍 **Health Monitoring** with detailed status endpoints
+### Application Features
+- **Add Tasks** with real-time updates
+- **Delete Tasks** with confirmation
+- **Responsive Design** optimized for all devices
+- **Modern UI** with updated color scheme
+- **High Performance** with optimized database queries
+- **Health Monitoring** with detailed status endpoints
 
 ---
 
-## 🛠️ **Technology Stack**
+## Technology Stack
 
-### **☁️ Cloud Infrastructure**
+### Cloud Infrastructure
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **Compute** | AWS EC2 (t3.micro) | Web application hosting |
@@ -276,7 +298,7 @@ flowchart TD
 | **Storage** | AWS EBS (gp3), S3 | Instance storage & log archival |
 | **Network** | AWS VPC, Subnets, NACLs | Network isolation & security |
 
-### **🔧 DevOps & Infrastructure**
+### DevOps & Infrastructure
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **IaC** | Terraform 1.5+ | Infrastructure provisioning |
@@ -285,7 +307,7 @@ flowchart TD
 | **Secrets** | AWS Secrets Manager | Secure credential storage |
 | **State Management** | Terraform S3 Backend | Infrastructure state management |
 
-### **📊 Monitoring & Observability**
+### Monitoring & Observability
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **Metrics** | CloudWatch, Custom Metrics | Performance monitoring |
@@ -294,7 +316,7 @@ flowchart TD
 | **Alerting** | SNS, CloudWatch Alarms | Proactive notifications |
 | **APM** | AWS Application Insights | Application performance monitoring |
 
-### **💻 Application Stack**
+### Application Stack
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **Frontend** | HTML5, CSS3, JavaScript | User interface |
@@ -305,95 +327,95 @@ flowchart TD
 
 ---
 
-## 📁 **Project Structure**
+## Project Structure
 
 ```
 proxy-lamp-stack-application/
-├── 📁 .github/workflows/              # CI/CD Pipeline
-│   └── 📄 deploy.yml                 # GitHub Actions workflow
+├── .github/workflows/              # CI/CD Pipeline
+│   └── deploy.yml                 # GitHub Actions workflow
 │
-├── 📁 terraform/                      # Infrastructure as Code
-│   ├── 📄 main.tf                    # Main Terraform configuration
-│   ├── 📄 variables.tf               # Input variables
-│   ├── 📄 outputs.tf                 # Output values
-│   ├── 📄 userdata.sh               # EC2 bootstrap script
+├── terraform/                      # Infrastructure as Code
+│   ├── main.tf                    # Main Terraform configuration
+│   ├── variables.tf               # Input variables
+│   ├── outputs.tf                 # Output values
+│   ├── userdata.sh               # EC2 bootstrap script
 │   │
-│   ├── 📁 modules/vpc/               # VPC Module
-│   │   ├── 📄 main.tf               # VPC resources
-│   │   ├── 📄 variables.tf          # VPC variables
-│   │   └── 📄 outputs.tf            # VPC outputs
+│   ├── modules/vpc/               # VPC Module
+│   │   ├── main.tf               # VPC resources
+│   │   ├── variables.tf          # VPC variables
+│   │   └── outputs.tf            # VPC outputs
 │   │
-│   ├── 📁 modules/security/          # Security Module
-│   │   ├── 📄 main.tf               # Security Groups & NACLs
-│   │   ├── 📄 variables.tf          # Security variables
-│   │   └── 📄 outputs.tf            # Security outputs
+│   ├── modules/security/          # Security Module
+│   │   ├── main.tf               # Security Groups & NACLs
+│   │   ├── variables.tf          # Security variables
+│   │   └── outputs.tf            # Security outputs
 │   │
-│   ├── 📁 modules/load_balancer/     # Load Balancer Module
-│   │   ├── 📄 main.tf               # ALB, Target Groups, Listeners
-│   │   ├── 📄 variables.tf          # LB variables
-│   │   └── 📄 outputs.tf            # LB outputs
+│   ├── modules/load_balancer/     # Load Balancer Module
+│   │   ├── main.tf               # ALB, Target Groups, Listeners
+│   │   ├── variables.tf          # LB variables
+│   │   └── outputs.tf            # LB outputs
 │   │
-│   ├── 📁 modules/compute/           # Compute Module
-│   │   ├── 📄 main.tf               # ASG, Launch Template, Scaling
-│   │   ├── 📄 variables.tf          # Compute variables
-│   │   └── 📄 outputs.tf            # Compute outputs
+│   ├── modules/compute/           # Compute Module
+│   │   ├── main.tf               # ASG, Launch Template, Scaling
+│   │   ├── variables.tf          # Compute variables
+│   │   └── outputs.tf            # Compute outputs
 │   │
-│   ├── 📁 modules/database/          # Database Module
-│   │   ├── 📄 main.tf               # RDS MySQL, Parameter Groups
-│   │   ├── 📄 variables.tf          # Database variables
-│   │   └── 📄 outputs.tf            # Database outputs
+│   ├── modules/database/          # Database Module
+│   │   ├── main.tf               # RDS MySQL, Parameter Groups
+│   │   ├── variables.tf          # Database variables
+│   │   └── outputs.tf            # Database outputs
 │   │
-│   └── 📁 modules/monitoring/        # Monitoring Module
-│       ├── 📄 main.tf               # CloudWatch, Dashboards, Alarms
-│       ├── 📄 variables.tf          # Monitoring variables
-│       └── 📄 outputs.tf            # Monitoring outputs
+│   └── modules/monitoring/        # Monitoring Module
+│       ├── main.tf               # CloudWatch, Dashboards, Alarms
+│       ├── variables.tf          # Monitoring variables
+│       └── outputs.tf            # Monitoring outputs
 │
-├── 📁 app/                           # PHP Application
-│   ├── 📄 index.php                 # Main application page
-│   ├── 📄 add.php                   # Add task functionality
-│   ├── 📄 delete.php                # Delete task functionality
-│   ├── 📄 config.php                # Database configuration
-│   ├── 📄 health.php                # Health check endpoint
-│   └── 📄 styles.css                # Application styling (updated)
+├── app/                           # PHP Application
+│   ├── index.php                 # Main application page
+│   ├── add.php                   # Add task functionality
+│   ├── delete.php                # Delete task functionality
+│   ├── config.php                # Database configuration
+│   ├── health.php                # Health check endpoint
+│   └── styles.css                # Application styling (updated)
 │
-├── 📁 monitoring/                    # Monitoring Configuration
-│   ├── 📄 cloudwatch-agent.json     # CloudWatch agent config
-│   └── 📄 custom-metrics.sh         # Custom metrics script
+├── monitoring/                    # Monitoring Configuration
+│   ├── cloudwatch-agent.json     # CloudWatch agent config
+│   └── custom-metrics.sh         # Custom metrics script
 │
-├── 📄 README.md                      # This documentation
-└── 📄 .gitignore                    # Git ignore rules
+├── README.md                      # This documentation
+└── .gitignore                    # Git ignore rules
 ```
 
 ---
 
-## 📋 **Prerequisites**
+## Prerequisites
 
-### **🔧 Required Tools**
+### Required Tools
 - **AWS Account** with appropriate permissions
 - **Terraform** >= 1.5.0 installed locally
 - **AWS CLI** configured with credentials
 - **Git** for version control
 - **SSH client** for server access (optional)
 
-### **☁️ AWS Permissions Required**
+### AWS Permissions Required
 Your AWS user/role needs permissions for:
-- 🖥️ **EC2** (instances, auto scaling, load balancers)
-- 🌐 **VPC** (networking components)
-- 🗄️ **RDS** (database instances)
-- 📊 **CloudWatch** (monitoring and logging)
-- 🪣 **S3** (Terraform state bucket, ALB logs)
-- 🔐 **IAM** (roles and policies)
-- 🔐 **Secrets Manager** (credential storage)
+- **EC2** (instances, auto scaling, load balancers)
+- **VPC** (networking components)
+- **RDS** (database instances)
+- **CloudWatch** (monitoring and logging)
+- **S3** (Terraform state bucket, ALB logs)
+- **IAM** (roles and policies)
+- **Secrets Manager** (credential storage)
 
-### **🔐 GitHub Repository Setup**
+### GitHub Repository Setup
 - GitHub repository with Actions enabled
 - Required GitHub Secrets configured (see setup guide)
 
 ---
 
-## 🚀 **Quick Start**
+## Quick Start
 
-### **1. 📥 Clone and Setup**
+### 1. Clone and Setup
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/proxy-lamp-stack-application.git
@@ -403,7 +425,7 @@ cd proxy-lamp-stack-application
 ssh-keygen -t rsa -b 2048 -f proxy-lamp-keypair
 ```
 
-### **2. 🪣 Create S3 Bucket for Terraform State**
+### 2. Create S3 Bucket for Terraform State
 ```bash
 # Create a unique bucket name
 BUCKET_NAME="proxy-lamp-stack-tfstate-$(whoami)-$(date +%s)"
@@ -418,7 +440,7 @@ aws s3api put-bucket-versioning \
   --versioning-configuration Status=Enabled
 ```
 
-### **3. 🔧 Update Configuration**
+### 3. Update Configuration
 Edit `terraform/main.tf` and update the S3 bucket name:
 ```hcl
 backend "s3" {
@@ -428,7 +450,7 @@ backend "s3" {
 }
 ```
 
-### **4. 🔐 Set GitHub Secrets**
+### 4. Set GitHub Secrets
 In your GitHub repository, add these secrets:
 - `AWS_ACCESS_KEY_ID` - Your AWS access key
 - `AWS_SECRET_ACCESS_KEY` - Your AWS secret key
@@ -436,7 +458,7 @@ In your GitHub repository, add these secrets:
 - `EC2_PRIVATE_KEY` - Contents of `proxy-lamp-keypair`
 - `DB_PASSWORD` - Database password (optional, auto-generated if not provided)
 
-### **5. 🚀 Deploy**
+### 5. Deploy
 ```bash
 # Commit and push to trigger deployment
 git add .
@@ -444,14 +466,14 @@ git commit -m "Initial proxy LAMP stack deployment"
 git push origin main
 ```
 
-### **6. 🌐 Access Your Application**
+### 6. Access Your Application
 Visit your application at the Load Balancer DNS after 10-15 minutes!
 
 ---
 
-## 📖 **Detailed Setup Guide**
+## Detailed Setup Guide
 
-### **Step 1: AWS Account Configuration**
+### Step 1: AWS Account Configuration
 
 1. **Create AWS Account** (if you don't have one)
 2. **Create IAM User** with programmatic access
@@ -483,7 +505,7 @@ Visit your application at the Load Balancer DNS after 10-15 minutes!
    # Default output format: json
    ```
 
-### **Step 2: Infrastructure Setup**
+### Step 2: Infrastructure Setup
 
 1. **Generate SSH Keys:**
    ```bash
@@ -523,7 +545,7 @@ Visit your application at the Load Balancer DNS after 10-15 minutes!
    echo "Created bucket: $BUCKET_NAME"
    ```
 
-### **Step 3: GitHub Configuration**
+### Step 3: GitHub Configuration
 
 1. **Fork/Clone Repository:**
    ```bash
@@ -542,7 +564,7 @@ Visit your application at the Load Balancer DNS after 10-15 minutes!
    | `EC2_PRIVATE_KEY` | Contents of `proxy-lamp-keypair` | SSH private key for deployment |
    | `DB_PASSWORD` | Strong password | RDS database password |
 
-### **Step 4: Local Testing (Optional)**
+### Step 4: Local Testing (Optional)
 
 ```bash
 cd terraform
@@ -566,61 +588,67 @@ terraform apply \
 
 ---
 
-## 🔄 **Deployment Workflow**
+## Deployment Workflow
 
-### **GitHub Actions Pipeline Stages**
+### GitHub Actions Pipeline Stages
 
 ```mermaid
 flowchart LR
-    A[📝 Code Push] --> B[🔍 Validation]
-    B --> C[🏗️ Infrastructure]
-    C --> D[🚀 Deployment]
-    D --> E[✅ Health Check]
+    A[Code Push to Main] --> B[Validation Stage]
+    B --> C[Infrastructure Stage]
+    C --> D[Deployment Stage]
+    D --> E[Health Check Stage]
     
-    subgraph "Validation Stage"
+    subgraph "Validation"
         B --> B1[Terraform Validate]
         B --> B2[Syntax Check]
         B --> B3[Security Scan]
     end
     
-    subgraph "Infrastructure Stage"
+    subgraph "Infrastructure"
         C --> C1[Terraform Plan]
         C --> C2[Resource Creation]
         C --> C3[Network Setup]
         C --> C4[Security Config]
     end
     
-    subgraph "Deployment Stage"
+    subgraph "Deployment"
         D --> D1[Wait for Instances]
         D --> D2[Deploy Application]
         D --> D3[Configure Monitoring]
         D --> D4[Update Load Balancer]
     end
     
-    subgraph "Health Check Stage"
+    subgraph "Health Checks"
         E --> E1[Load Balancer Health]
         E --> E2[Application Health]
         E --> E3[Database Health]
         E --> E4[Monitoring Alerts]
     end
     
-    style A fill:#e1f5fe
-    style B fill:#f3e5f5
-    style C fill:#e8f5e8
-    style D fill:#fff3e0
-    style E fill:#e8f5e8
+    classDef pushClass fill:#2196f3,stroke:#0d47a1,stroke-width:3px,color:#fff
+    classDef validationClass fill:#9c27b0,stroke:#4a148c,stroke-width:3px,color:#fff
+    classDef infraClass fill:#4caf50,stroke:#1b5e20,stroke-width:3px,color:#fff
+    classDef deployClass fill:#ff9800,stroke:#e65100,stroke-width:3px,color:#fff
+    classDef healthClass fill:#4caf50,stroke:#1b5e20,stroke-width:3px,color:#fff
+    
+    class A pushClass
+    class B,B1,B2,B3 validationClass
+    class C,C1,C2,C3,C4 infraClass
+    class D,D1,D2,D3,D4 deployClass
+    class E,E1,E2,E3,E4 healthClass
 ```
 
-### **Deployment Process**
+### Deployment Process
 
-1. **🔍 Trigger**: Push to `main` branch
-2. **🏗️ Infrastructure**: Terraform creates/updates resources
-3. **⏳ Wait**: Allow 5 minutes for instance initialization
-4. **🚀 Deploy**: SSH to all instances in Auto Scaling Group
-5. **📊 Monitor**: Configure CloudWatch agent and custom metrics
-6. **✅ Verify**: Health checks confirm successful deployment
+1. **Trigger**: Push to `main` branch
+2. **Infrastructure**: Terraform creates/updates resources
+3. **Wait**: Allow 5 minutes for instance initialization
+4. **Deploy**: SSH to all instances in Auto Scaling Group
+5. **Monitor**: Configure CloudWatch agent and custom metrics
+6. **Verify**: Health checks confirm successful deployment
 
-### **Rollback Strategy**
+### Rollback Strategy
 
 ```bash
 # Emergency rollback
@@ -634,22 +662,22 @@ terraform apply -target=module.compute
 
 ---
 
-## 💻 **Application Features**
+## Application Features
 
-### **🎨 User Interface**
+### User Interface
 - **Modern Design** with updated color scheme (red/blue theme)
 - **Responsive Layout** optimized for desktop, tablet, and mobile
 - **Smooth Animations** and hover effects
 - **Accessibility Features** with proper contrast and semantic markup
 
-### **⚡ Functionality**
+### Functionality
 - **Add Tasks** with real-time form validation
 - **Delete Tasks** with confirmation dialog
 - **Task Persistence** using RDS MySQL
 - **Error Handling** with user-friendly messages
 - **Health Monitoring** with detailed system status
 
-### **🔒 Security Features**
+### Security Features
 - **SQL Injection Protection** using prepared statements
 - **XSS Prevention** with input sanitization
 - **CSRF Protection** with form validation
@@ -657,36 +685,46 @@ terraform apply -target=module.compute
 
 ---
 
-## 🔒 **Security Implementation**
+## Security Implementation
 
-### **🌐 Network Security**
+### Network Security
 
-#### **Multi-Layer Defense**
+#### Multi-Layer Defense
 ```mermaid
 graph TB
-    Internet[🌐 Internet] --> WAF[🛡️ AWS WAF]
-    WAF --> ALB[⚖️ Load Balancer]
-    ALB --> SG1[🔒 Web Security Group]
-    SG1 --> EC2[🖥️ Web Servers]
-    EC2 --> SG2[🔒 DB Security Group]
-    SG2 --> RDS[🗄️ Database]
+    Internet[Internet Traffic] --> WAF[AWS WAF Protection]
+    WAF --> ALB[Application Load Balancer]
+    ALB --> SG1[Web Security Group<br/>Port 80/443 Only]
+    SG1 --> EC2[EC2 Web Servers<br/>Private Subnets]
+    EC2 --> SG2[Database Security Group<br/>Port 3306 Only]
+    SG2 --> RDS[RDS MySQL Database<br/>Private Subnets]
     
     subgraph "Security Layers"
         WAF
         SG1
         SG2
-        NACL[🛡️ Network ACLs]
-        VPC[🏗️ VPC Isolation]
+        NACL[Network ACLs<br/>Subnet Level]
+        VPC[VPC Isolation<br/>10.0.0.0/16]
     end
     
-    style WAF fill:#ffebee
-    style SG1 fill:#e8f5e8
-    style SG2 fill:#fff3e0
-    style NACL fill:#f3e5f5
-    style VPC fill:#e1f5fe
+    classDef internetClass fill:#f44336,stroke:#b71c1c,stroke-width:4px,color:#fff
+    classDef wafClass fill:#ff5722,stroke:#d84315,stroke-width:4px,color:#fff
+    classDef albClass fill:#ff9800,stroke:#e65100,stroke-width:4px,color:#fff
+    classDef securityClass fill:#4caf50,stroke:#1b5e20,stroke-width:4px,color:#fff
+    classDef serverClass fill:#2196f3,stroke:#0d47a1,stroke-width:4px,color:#fff
+    classDef dbClass fill:#9c27b0,stroke:#4a148c,stroke-width:4px,color:#fff
+    classDef networkClass fill:#607d8b,stroke:#263238,stroke-width:4px,color:#fff
+    
+    class Internet internetClass
+    class WAF wafClass
+    class ALB albClass
+    class SG1,SG2 securityClass
+    class EC2 serverClass
+    class RDS dbClass
+    class NACL,VPC networkClass
 ```
 
-#### **Security Group Configuration**
+#### Security Group Configuration
 ```hcl
 # ALB Security Group
 resource "aws_security_group" "alb_sg" {
@@ -726,50 +764,50 @@ resource "aws_security_group" "db_sg" {
 }
 ```
 
-### **🔐 Data Security**
+### Data Security
 - **Encryption at Rest**: EBS volumes and RDS instances encrypted
 - **Encryption in Transit**: SSL/TLS for all communications
 - **Secrets Management**: AWS Secrets Manager for credentials
 - **Database Security**: Network isolation and access controls
 
-### **🔑 Identity & Access Management**
+### Identity & Access Management
 - **IAM Roles**: Least privilege access principles
 - **Instance Profiles**: Secure EC2 access to AWS services
 - **Policy Separation**: Different roles for different functions
 
 ---
 
-## 📊 **Monitoring & Observability**
+## Monitoring & Observability
 
-### **📈 CloudWatch Dashboard**
+### CloudWatch Dashboard
 
 The comprehensive dashboard includes:
 
-#### **🔄 Load Balancer Metrics**
+#### Load Balancer Metrics
 - Request count and response times
 - HTTP status code distribution (2xx, 4xx, 5xx)
 - Target health status
 - Connection errors and timeouts
 
-#### **🖥️ Auto Scaling Metrics**
+#### Auto Scaling Metrics
 - Instance count (min, max, desired, in-service)
 - Scaling activities and triggers
 - CPU utilization across instances
 - Network I/O and disk usage
 
-#### **🗄️ Database Metrics**
+#### Database Metrics
 - CPU utilization and memory usage
 - Database connections and query performance
 - Storage usage and free space
 - Read/write latency and throughput
 
-#### **💻 Application Metrics**
+#### Application Metrics
 - Custom application performance indicators
 - Task count and user activity
 - Error rates and response times
 - Health check status
 
-### **📊 Custom Metrics Collection**
+### Custom Metrics Collection
 
 ```bash
 # Custom metrics script runs every 5 minutes
@@ -784,25 +822,25 @@ The comprehensive dashboard includes:
 - Request count and error rates
 ```
 
-### **🚨 Smart Alerting**
+### Smart Alerting
 
-#### **Alert Categories**
-1. **🔥 Critical Alerts** (Immediate action required)
+#### Alert Categories
+1. **Critical Alerts** (Immediate action required)
    - Database connection failures
    - All instances unhealthy
    - High error rates (>5%)
 
-2. **⚠️ Warning Alerts** (Monitor closely)
+2. **Warning Alerts** (Monitor closely)
    - High CPU usage (>80%)
    - Low healthy instances (<2)
    - Slow response times (>2s)
 
-3. **📊 Information Alerts** (Awareness)
+3. **Information Alerts** (Awareness)
    - Scaling events
    - Configuration changes
    - Deployment completions
 
-#### **Composite Alarms**
+#### Composite Alarms
 ```hcl
 resource "aws_cloudwatch_composite_alarm" "application_health" {
   alarm_rule = join(" OR ", [
@@ -815,11 +853,11 @@ resource "aws_cloudwatch_composite_alarm" "application_health" {
 
 ---
 
-## 🔍 **Health Checks**
+## Health Checks
 
-### **🏥 Multi-Layer Health Monitoring**
+### Multi-Layer Health Monitoring
 
-#### **1. Load Balancer Health Checks**
+#### 1. Load Balancer Health Checks
 ```yaml
 Target Group Health Check:
   Protocol: HTTP
@@ -831,7 +869,7 @@ Target Group Health Check:
   Matcher: 200
 ```
 
-#### **2. Application Health Endpoint**
+#### 2. Application Health Endpoint
 ```php
 // /health.php response
 {
@@ -855,13 +893,13 @@ Target Group Health Check:
 }
 ```
 
-#### **3. System Health Monitoring**
+#### 3. System Health Monitoring
 - **CPU Usage**: Real-time monitoring with scaling triggers
 - **Memory Usage**: Track and alert on high utilization
 - **Disk Space**: Monitor storage with proactive alerts
 - **Network Health**: Connection count and bandwidth monitoring
 
-### **🔄 Auto-Recovery Mechanisms**
+### Auto-Recovery Mechanisms
 
 1. **Instance Replacement**: Unhealthy instances automatically terminated
 2. **Auto Scaling**: Capacity adjusted based on demand
@@ -870,16 +908,16 @@ Target Group Health Check:
 
 ---
 
-## ⚖️ **Load Balancing**
+## Load Balancing
 
-### **🔄 Application Load Balancer Features**
+### Application Load Balancer Features
 
-#### **Traffic Distribution**
+#### Traffic Distribution
 - **Round Robin**: Default algorithm for even distribution
 - **Least Outstanding Requests**: Route to instance with fewest active requests
 - **Health-based Routing**: Only route to healthy instances
 
-#### **SSL/TLS Termination**
+#### SSL/TLS Termination
 ```hcl
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.proxy_lamp_alb.arn
@@ -895,7 +933,7 @@ resource "aws_lb_listener" "https" {
 }
 ```
 
-#### **Sticky Sessions** (Optional)
+#### Sticky Sessions (Optional)
 ```hcl
 stickiness {
   type            = "lb_cookie"
@@ -904,9 +942,9 @@ stickiness {
 }
 ```
 
-### **🎯 Target Group Configuration**
+### Target Group Configuration
 
-#### **Health Check Settings**
+#### Health Check Settings
 - **Path**: `/health.php`
 - **Protocol**: HTTP
 - **Port**: 80
@@ -914,17 +952,17 @@ stickiness {
 - **Timeout**: 5s
 - **Healthy/Unhealthy Thresholds**: 2/3
 
-#### **Deregistration Delay**
+#### Deregistration Delay
 - **Setting**: 30 seconds
 - **Purpose**: Allow in-flight requests to complete before termination
 
 ---
 
-## 📈 **Auto Scaling**
+## Auto Scaling
 
-### **📊 Scaling Policies**
+### Scaling Policies
 
-#### **1. Target Tracking Policy**
+#### 1. Target Tracking Policy
 ```hcl
 resource "aws_autoscaling_policy" "target_tracking" {
   name                   = "target-tracking-policy"
@@ -940,7 +978,7 @@ resource "aws_autoscaling_policy" "target_tracking" {
 }
 ```
 
-#### **2. Simple Scaling Policies**
+#### 2. Simple Scaling Policies
 ```hcl
 # Scale Up Policy
 resource "aws_autoscaling_policy" "scale_up" {
@@ -959,7 +997,7 @@ resource "aws_autoscaling_policy" "scale_down" {
 }
 ```
 
-### **⚙️ Scaling Configuration**
+### Scaling Configuration
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
@@ -970,7 +1008,7 @@ resource "aws_autoscaling_policy" "scale_down" {
 | **Scale Down Threshold** | CPU < 30% | Cost optimization |
 | **Cooldown Period** | 5 minutes | Prevent flapping |
 
-### **🕒 Scheduled Scaling** (Optional)
+### Scheduled Scaling (Optional)
 ```hcl
 # Business Hours Scale Up
 resource "aws_autoscaling_schedule" "business_hours" {
@@ -991,11 +1029,11 @@ resource "aws_autoscaling_schedule" "off_hours" {
 
 ---
 
-## 🗄️ **Database Management**
+## Database Management
 
-### **🔧 RDS MySQL Configuration**
+### RDS MySQL Configuration
 
-#### **Instance Specifications**
+#### Instance Specifications
 ```hcl
 resource "aws_db_instance" "proxy_lamp_mysql" {
   # Engine Configuration
@@ -1024,7 +1062,7 @@ resource "aws_db_instance" "proxy_lamp_mysql" {
 }
 ```
 
-#### **Performance Optimization**
+#### Performance Optimization
 ```hcl
 # Parameter Group
 resource "aws_db_parameter_group" "mysql_params" {
@@ -1047,29 +1085,29 @@ resource "aws_db_parameter_group" "mysql_params" {
 }
 ```
 
-### **🔐 Security & Backup**
+### Security & Backup
 
-#### **Encryption**
+#### Encryption
 - **At Rest**: KMS encryption for storage
 - **In Transit**: SSL/TLS connections enforced
 - **Key Rotation**: Automatic key rotation enabled
 
-#### **Backup Strategy**
+#### Backup Strategy
 - **Automated Backups**: 7-day retention
 - **Manual Snapshots**: Before major changes
 - **Point-in-Time Recovery**: Up to backup retention period
 - **Cross-Region Backups**: For disaster recovery (optional)
 
-### **📊 Database Monitoring**
+### Database Monitoring
 
-#### **Key Metrics**
+#### Key Metrics
 - **CPU Utilization**: Target <80%
 - **Database Connections**: Monitor for connection leaks
 - **Free Storage Space**: Alert when <2GB
 - **Read/Write Latency**: Performance indicators
 - **Query Performance**: Slow query log analysis
 
-#### **Performance Insights**
+#### Performance Insights
 ```hcl
 performance_insights_enabled          = true
 performance_insights_retention_period = 7
@@ -1077,32 +1115,38 @@ performance_insights_retention_period = 7
 
 ---
 
-## 📝 **Logging Strategy**
+## Logging Strategy
 
-### **📊 Log Collection Architecture**
+### Log Collection Architecture
 
 ```mermaid
 flowchart TD
-    A[🖥️ EC2 Instances] --> B[📄 Local Log Files]
-    B --> C[☁️ CloudWatch Agent]
-    C --> D[📊 CloudWatch Logs]
+    A[EC2 Instances] --> B[Local Log Files]
+    B --> C[CloudWatch Agent]
+    C --> D[CloudWatch Logs]
     
-    D --> E[🔍 Log Insights]
-    D --> F[📊 Metric Filters]
-    D --> G[🚨 Log-based Alarms]
+    D --> E[Log Insights Queries]
+    D --> F[Metric Filters]
+    D --> G[Log-based Alarms]
     
-    E --> H[📋 Query Analysis]
-    F --> I[📈 Custom Metrics]
-    G --> J[📧 Notifications]
+    E --> H[Query Analysis & Reports]
+    F --> I[Custom Metrics Dashboard]
+    G --> J[Alert Notifications]
     
-    style A fill:#e8f5e8
-    style D fill:#e3f2fd
-    style H fill:#fff3e0
-    style I fill:#f3e5f5
-    style J fill:#ffebee
+    classDef serverClass fill:#4caf50,stroke:#1b5e20,stroke-width:3px,color:#fff
+    classDef logClass fill:#2196f3,stroke:#0d47a1,stroke-width:3px,color:#fff
+    classDef cloudwatchClass fill:#ff9800,stroke:#e65100,stroke-width:3px,color:#fff
+    classDef analysisClass fill:#9c27b0,stroke:#4a148c,stroke-width:3px,color:#fff
+    classDef alertClass fill:#f44336,stroke:#b71c1c,stroke-width:3px,color:#fff
+    
+    class A,B serverClass
+    class C,D logClass
+    class E,F,G cloudwatchClass
+    class H,I analysisClass
+    class J alertClass
 ```
 
-### **📄 Log Types & Locations**
+### Log Types & Locations
 
 | Log Type | Location | Purpose | Retention |
 |----------|----------|---------|-----------|
@@ -1113,9 +1157,9 @@ flowchart TD
 | **Custom Metrics** | `/var/log/proxy-lamp-metrics.log` | Metrics collection | 7 days |
 | **ALB Access** | `S3://alb-logs-bucket/` | Load balancer logs | 30 days |
 
-### **🔍 Log Analysis Queries**
+### Log Analysis Queries
 
-#### **Error Analysis**
+#### Error Analysis
 ```sql
 fields @timestamp, @message
 | filter @message like /ERROR/
@@ -1123,7 +1167,7 @@ fields @timestamp, @message
 | sort @timestamp desc
 ```
 
-#### **Top Pages Analysis**
+#### Top Pages Analysis
 ```sql
 fields @timestamp, @message
 | parse @message /(?<ip>\S+) .* "(?<method>\S+) (?<url>\S+) .*" (?<status>\d+)/
@@ -1133,7 +1177,7 @@ fields @timestamp, @message
 | limit 10
 ```
 
-#### **Response Time Analysis**
+#### Response Time Analysis
 ```sql
 fields @timestamp, @message
 | parse @message /(?<response_time>\d+)$/
@@ -1142,9 +1186,9 @@ fields @timestamp, @message
 | sort @timestamp desc
 ```
 
-### **📊 Metric Filters**
+### Metric Filters
 
-#### **Error Count Metric**
+#### Error Count Metric
 ```hcl
 resource "aws_cloudwatch_log_metric_filter" "error_count" {
   name           = "error-count"
@@ -1161,11 +1205,11 @@ resource "aws_cloudwatch_log_metric_filter" "error_count" {
 
 ---
 
-## 🎛️ **Configuration**
+## Configuration
 
-### **🔧 Environment Variables**
+### Environment Variables
 
-#### **Application Configuration**
+#### Application Configuration
 ```bash
 # Database Configuration
 DB_HOST=proxy-lamp-mysql-endpoint.region.rds.amazonaws.com
@@ -1184,7 +1228,7 @@ AWS_REGION=eu-central-1
 AWS_DEFAULT_REGION=eu-central-1
 ```
 
-#### **Terraform Variables**
+#### Terraform Variables
 ```hcl
 # terraform/terraform.tfvars
 aws_region = "eu-central-1"
@@ -1197,9 +1241,9 @@ db_allocated_storage = 20
 enable_multi_az = false  # Set to true for production
 ```
 
-### **🔄 Configuration Management**
+### Configuration Management
 
-#### **Instance Configuration**
+#### Instance Configuration
 ```bash
 # User data script configures:
 - LAMP stack installation
@@ -1209,7 +1253,7 @@ enable_multi_az = false  # Set to true for production
 - Performance tuning
 ```
 
-#### **Auto Scaling Configuration**
+#### Auto Scaling Configuration
 ```hcl
 # Launch Template
 user_data = base64encode(templatefile("userdata.sh", {
@@ -1219,9 +1263,9 @@ user_data = base64encode(templatefile("userdata.sh", {
 }))
 ```
 
-### **🎨 Application Customization**
+### Application Customization
 
-#### **Color Scheme Updates**
+#### Color Scheme Updates
 ```css
 /* New color palette */
 :root {
@@ -1232,7 +1276,7 @@ user_data = base64encode(templatefile("userdata.sh", {
 }
 ```
 
-#### **Performance Tuning**
+#### Performance Tuning
 ```php
 // config.php optimizations
 - Connection pooling
@@ -1243,11 +1287,11 @@ user_data = base64encode(templatefile("userdata.sh", {
 
 ---
 
-## 🔧 **Troubleshooting**
+## Troubleshooting
 
-### **🚨 Common Issues & Solutions**
+### Common Issues & Solutions
 
-#### **1. 🔄 Load Balancer Issues**
+#### 1. Load Balancer Issues
 
 **Problem**: Health checks failing
 ```bash
@@ -1272,7 +1316,7 @@ aws logs start-query \
   --query-string 'filter @message like /5\d\d/'
 ```
 
-#### **2. 🗄️ Database Issues**
+#### 2. Database Issues
 
 **Problem**: Connection timeouts
 ```bash
@@ -1297,7 +1341,7 @@ aws rds modify-db-parameter-group \
   --parameters ParameterName=slow_query_log,ParameterValue=1
 ```
 
-#### **3. 📈 Auto Scaling Issues**
+#### 3. Auto Scaling Issues
 
 **Problem**: Instances not scaling
 ```bash
@@ -1316,7 +1360,7 @@ aws cloudwatch get-metric-statistics \
   --statistics Average
 ```
 
-#### **4. 📊 Monitoring Issues**
+#### 4. Monitoring Issues
 
 **Problem**: CloudWatch agent not sending metrics
 ```bash
@@ -1330,9 +1374,9 @@ sudo systemctl restart amazon-cloudwatch-agent
 sudo tail -f /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
 ```
 
-### **🔍 Debugging Commands**
+### Debugging Commands
 
-#### **System Health Check**
+#### System Health Check
 ```bash
 # Complete system status
 curl -s http://localhost/health.php | jq '.'
@@ -1346,7 +1390,7 @@ free -h
 df -h
 ```
 
-#### **Network Diagnostics**
+#### Network Diagnostics
 ```bash
 # Test connectivity
 ping -c 3 8.8.8.8
@@ -1360,7 +1404,7 @@ aws ec2 describe-security-groups \
   --group-ids sg-xxxxxxxxx
 ```
 
-#### **Log Analysis**
+#### Log Analysis
 ```bash
 # Real-time log monitoring
 tail -f /var/log/apache2/error.log
@@ -1371,9 +1415,9 @@ grep -i error /var/log/apache2/error.log | tail -20
 grep -i mysql /var/log/apache2/error.log
 ```
 
-### **🔧 Performance Optimization**
+### Performance Optimization
 
-#### **Database Optimization**
+#### Database Optimization
 ```sql
 -- Check slow queries
 SELECT * FROM mysql.slow_log ORDER BY start_time DESC LIMIT 10;
@@ -1385,7 +1429,7 @@ SHOW TABLE STATUS LIKE 'tasks';
 OPTIMIZE TABLE tasks;
 ```
 
-#### **Web Server Optimization**
+#### Web Server Optimization
 ```bash
 # Apache performance tuning
 sudo nano /etc/apache2/mods-available/mpm_prefork.conf
@@ -1399,11 +1443,11 @@ echo "opcache.enable=1" | sudo tee -a /etc/php/8.1/apache2/conf.d/10-opcache.ini
 
 ---
 
-## 🧹 **Cleanup**
+## Cleanup
 
-### **🗑️ Complete Infrastructure Cleanup**
+### Complete Infrastructure Cleanup
 
-#### **Option 1: Terraform Destroy (Recommended)**
+#### Option 1: Terraform Destroy (Recommended)
 ```bash
 cd terraform
 
@@ -1419,7 +1463,7 @@ terraform destroy \
   -auto-approve
 ```
 
-#### **Option 2: Manual Cleanup**
+#### Option 2: Manual Cleanup
 ```bash
 # List all resources with proxy-lamp tags
 aws resourcegroupstaggingapi get-resources \
@@ -1443,9 +1487,9 @@ aws rds delete-db-instance \
 aws ec2 delete-vpc --vpc-id vpc-xxxxxxxxx
 ```
 
-### **💰 Cost Monitoring**
+### Cost Monitoring
 
-#### **Check Current Costs**
+#### Check Current Costs
 ```bash
 # Get cost for current month
 aws ce get-cost-and-usage \
@@ -1455,7 +1499,7 @@ aws ce get-cost-and-usage \
   --group-by Type=DIMENSION,Key=SERVICE
 ```
 
-#### **Resource Usage Summary**
+#### Resource Usage Summary
 | Resource Type | Estimated Monthly Cost | Notes |
 |---------------|----------------------|-------|
 | **EC2 (t3.micro x2)** | ~$17 | Under free tier if eligible |
@@ -1466,36 +1510,36 @@ aws ce get-cost-and-usage \
 | **Data Transfer** | ~$5 | Varies with usage |
 | **Total** | **~$146/month** | Estimated for full production setup |
 
-### **💡 Cost Optimization Tips**
+### Cost Optimization Tips
 
-1. **🔄 Use NAT Instances** instead of NAT Gateways for development
-2. **📊 Implement Scheduled Scaling** to reduce off-hours costs
-3. **🗄️ Use RDS Reserved Instances** for long-term savings
-4. **📝 Enable Log Retention** to control storage costs
-5. **🔍 Monitor with AWS Cost Explorer** for ongoing optimization
+1. **Use NAT Instances** instead of NAT Gateways for development
+2. **Implement Scheduled Scaling** to reduce off-hours costs
+3. **Use RDS Reserved Instances** for long-term savings
+4. **Enable Log Retention** to control storage costs
+5. **Monitor with AWS Cost Explorer** for ongoing optimization
 
 ---
 
-## 🎉 **Conclusion**
+## Conclusion
 
 This Proxy LAMP Stack application demonstrates enterprise-grade AWS deployment with:
 
-- ✅ **High Availability** with Multi-AZ architecture
-- ✅ **Scalability** with Auto Scaling and Load Balancing
-- ✅ **Security** with VPC isolation and encrypted storage
-- ✅ **Monitoring** with comprehensive observability
-- ✅ **Automation** with Infrastructure as Code and CI/CD
-- ✅ **Cost Optimization** with right-sized resources
+- **High Availability** with Multi-AZ architecture
+- **Scalability** with Auto Scaling and Load Balancing
+- **Security** with VPC isolation and encrypted storage
+- **Monitoring** with comprehensive observability
+- **Automation** with Infrastructure as Code and CI/CD
+- **Cost Optimization** with right-sized resources
 
-### **🚀 Next Steps**
+### Next Steps
 
-1. **🔒 Enable HTTPS** with ACM certificates
-2. **🛡️ Configure WAF** for additional security
-3. **🌍 Add CloudFront** for global content delivery
-4. **📊 Implement Custom Dashboards** for business metrics
-5. **🔄 Set up Blue/Green Deployments** for zero-downtime updates
+1. **Enable HTTPS** with ACM certificates
+2. **Configure WAF** for additional security
+3. **Add CloudFront** for global content delivery
+4. **Implement Custom Dashboards** for business metrics
+5. **Set up Blue/Green Deployments** for zero-downtime updates
 
-### **📚 Additional Resources**
+### Additional Resources
 
 - **AWS Well-Architected Framework**: [https://aws.amazon.com/architecture/well-architected/](https://aws.amazon.com/architecture/well-architected/)
 - **Terraform Documentation**: [https://www.terraform.io/docs](https://www.terraform.io/docs)
@@ -1503,4 +1547,3 @@ This Proxy LAMP Stack application demonstrates enterprise-grade AWS deployment w
 - **MySQL 8.0 Documentation**: [https://dev.mysql.com/doc/refman/8.0/en/](https://dev.mysql.com/doc/refman/8.0/en/)
 
 ---
-
