@@ -1,81 +1,4 @@
-# GitHub Actions workflow to deploy a Proxy LAMP Stack application on AWS EC2 with Load Balancer
-
-name: Deploy Proxy LAMP Stack with Load Balancer
-
-# Triggers the workflow when code is pushed or a pull request is opened on the 'main' branch
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-# Environment variables shared across all jobs
-env:
-  AWS_REGION: eu-central-1                         # AWS region to deploy the infrastructure (UPDATED)
-  TF_VERSION: 1.5.0                             # Terraform version to use
-  DEPLOYMENT_BUCKET: proxy-lamp-deployment-cletusmangu-1749764715 # S3 bucket for deployment artifacts
-
-jobs:
-  terraform:
-    name: 'Terraform Infrastructure'
-    runs-on: ubuntu-latest                     # Run this job on the latest Ubuntu GitHub-hosted runner
-    outputs:
-      load_balancer_dns: ${{ steps.terraform-output.outputs.load_balancer_dns }}  # Pass ALB DNS to the next job
-      autoscaling_group_name: ${{ steps.terraform-output.outputs.autoscaling_group_name }}  # Pass ASG name instead of IPs
-    
-    defaults:
-      run:
-        shell: bash
-        working-directory: ./terraform         # All shell commands will run inside the ./terraform directory
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4                # Checks out your repo so the workflow can access the code
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3       # Official action to set up Terraform in the runner
-      with:
-        terraform_version: ${{ env.TF_VERSION }} # Use the version defined in the environment variable
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}             # Retrieved from GitHub Secrets
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Terraform Init
-      run: terraform init                      # Initializes the Terraform configuration directory
-
-    - name: Terraform Validate
-      run: terraform validate                  # Validates the Terraform syntax and configuration
-
-    - name: Terraform Plan
-      if: github.event_name == 'pull_request'  # Only runs on PRs to show the proposed changes
-      run: |
-        terraform plan \
-          -var="public_key=${{ secrets.EC2_PUBLIC_KEY }}" \
-          -var="db_password=${{ secrets.DB_PASSWORD }}" \
-          -no-color
-      continue-on-error: true                  # Prevents PRs from failing due to plan issues
-
-    - name: Terraform Apply
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push' # Only apply on main branch push
-      run: |
-        terraform apply \
-          -var="public_key=${{ secrets.EC2_PUBLIC_KEY }}" \
-          -var="db_password=${{ secrets.DB_PASSWORD }}" \
-          -auto-approve
-
-    - name: Get Terraform Outputs
-      if: github.ref == 'refs/heads/main'
-      id: terraform-output
-      run: |
-        echo "load_balancer_dns=$(terraform output -raw load_balancer_dns)" >> $GITHUB_OUTPUT
-        echo "autoscaling_group_name=$(terraform output -raw autoscaling_group_name)" >> $GITHUB_OUTPUT
-        # Output ASG name instead of trying to get instance IPs
-  
-  deploy:
+deploy:
     name: 'Deploy Application to Load Balanced Infrastructure'
     runs-on: ubuntu-latest                     # Another job on Ubuntu runner
     needs: terraform                           # Depends on the 'terraform' job to complete successfully
@@ -95,44 +18,169 @@ jobs:
     - name: Wait for Infrastructure to be Ready
       run: |
         echo "Waiting for Auto Scaling Group instances to be fully initialized..."
-        sleep 300  # Allows time for all EC2 instances in ASG to run user_data.sh and fully configure
+        sleep 120  # Reduced initial wait time
 
-    - name: Get Instance IPs from Auto Scaling Group
-      id: get-instances
+    - name: Debug Auto Scaling Group Status
       env:
         ASG_NAME: ${{ needs.terraform.outputs.autoscaling_group_name }}
       run: |
-        echo "Getting instance IPs from Auto Scaling Group: $ASG_NAME"
+        echo "=== Auto Scaling Group Debug Information ==="
+        echo "ASG Name: $ASG_NAME"
         
-        # Get instance IDs from ASG
-        INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
-          --auto-scaling-group-names "$ASG_NAME" \
-          --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
-          --output text)
-        
-        echo "Instance IDs: $INSTANCE_IDS"
-        
-        if [ -z "$INSTANCE_IDS" ]; then
-          echo "No instances found in Auto Scaling Group"
+        # Check if ASG exists
+        if ! aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME" --query 'AutoScalingGroups[0]' > /dev/null 2>&1; then
+          echo "ERROR: Auto Scaling Group '$ASG_NAME' not found!"
           exit 1
         fi
         
+        # Get ASG details
+        echo "=== ASG Configuration ==="
+        aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names "$ASG_NAME" \
+          --query 'AutoScalingGroups[0].{MinSize:MinSize,MaxSize:MaxSize,DesiredCapacity:DesiredCapacity,Instances:length(Instances)}' \
+          --output table
+        
+        # Get all instances (regardless of state)
+        echo "=== All Instances in ASG ==="
+        aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names "$ASG_NAME" \
+          --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,LifecycleState:LifecycleState,HealthStatus:HealthStatus,AvailabilityZone:AvailabilityZone}' \
+          --output table
+
+    - name: Wait for Instances to be InService
+      env:
+        ASG_NAME: ${{ needs.terraform.outputs.autoscaling_group_name }}
+      run: |
+        echo "Waiting for instances to reach InService state..."
+        
+        MAX_WAIT_MINUTES=20
+        WAIT_INTERVAL=30
+        ATTEMPTS=$((MAX_WAIT_MINUTES * 60 / WAIT_INTERVAL))
+        
+        for i in $(seq 1 $ATTEMPTS); do
+          echo "=== Attempt $i/$ATTEMPTS ==="
+          
+          # Get InService instances
+          INSERVICE_INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+            --output text)
+          
+          # Get desired capacity
+          DESIRED_CAPACITY=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].DesiredCapacity' \
+            --output text)
+          
+          # Count InService instances
+          if [ -n "$INSERVICE_INSTANCES" ]; then
+            INSERVICE_COUNT=$(echo "$INSERVICE_INSTANCES" | wc -w)
+          else
+            INSERVICE_COUNT=0
+          fi
+          
+          echo "InService instances: $INSERVICE_COUNT/$DESIRED_CAPACITY"
+          
+          if [ "$INSERVICE_COUNT" -ge 1 ]; then
+            echo "✅ At least one instance is InService!"
+            echo "INSERVICE_INSTANCES=$INSERVICE_INSTANCES" >> $GITHUB_ENV
+            break
+          fi
+          
+          # Show current instance states
+          echo "Current instance states:"
+          aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,State:LifecycleState,Health:HealthStatus}' \
+            --output table
+          
+          if [ $i -eq $ATTEMPTS ]; then
+            echo "❌ Timeout waiting for instances to be InService"
+            echo "This might indicate:"
+            echo "1. User data script is failing"
+            echo "2. Health checks are failing"
+            echo "3. Instance launch issues"
+            
+            # Try to get some instances anyway for debugging
+            ALL_INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$ASG_NAME" \
+              --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+              --output text)
+            
+            if [ -n "$ALL_INSTANCES" ]; then
+              echo "Found instances in other states, will try to deploy anyway: $ALL_INSTANCES"
+              echo "INSERVICE_INSTANCES=$ALL_INSTANCES" >> $GITHUB_ENV
+            else
+              echo "No instances found at all!"
+              exit 1
+            fi
+            break
+          fi
+          
+          echo "Waiting $WAIT_INTERVAL seconds before next check..."
+          sleep $WAIT_INTERVAL
+        done
+
+    - name: Get Instance IPs
+      id: get-instances
+      run: |
+        if [ -z "$INSERVICE_INSTANCES" ]; then
+          echo "No instances available for deployment"
+          exit 1
+        fi
+        
+        echo "Getting IP addresses for instances: $INSERVICE_INSTANCES"
+        
         # Get public IP addresses for the instances
         INSTANCE_IPS=$(aws ec2 describe-instances \
-          --instance-ids $INSTANCE_IDS \
-          --query 'Reservations[].Instances[].PublicIpAddress' \
+          --instance-ids $INSERVICE_INSTANCES \
+          --query 'Reservations[].Instances[?State.Name==`running`].PublicIpAddress' \
           --output text | tr '\t' ' ')
         
         echo "Instance IPs: $INSTANCE_IPS"
         
         if [ -z "$INSTANCE_IPS" ] || [ "$INSTANCE_IPS" = "None" ]; then
           echo "No public IP addresses found for instances"
-          exit 1
+          echo "Checking private IPs as fallback..."
+          
+          INSTANCE_IPS=$(aws ec2 describe-instances \
+            --instance-ids $INSERVICE_INSTANCES \
+            --query 'Reservations[].Instances[?State.Name==`running`].PrivateIpAddress' \
+            --output text | tr '\t' ' ')
+          
+          if [ -z "$INSTANCE_IPS" ]; then
+            echo "No IP addresses found!"
+            exit 1
+          else
+            echo "Using private IPs: $INSTANCE_IPS"
+          fi
         fi
         
         # Store IPs in environment for next step
         echo "INSTANCE_IPS=$INSTANCE_IPS" >> $GITHUB_ENV
         echo "Found instances with IPs: $INSTANCE_IPS"
+
+    - name: Check Instance Health Before Deployment
+      run: |
+        echo "Checking instance health before deployment..."
+        
+        for INSTANCE_IP in $INSTANCE_IPS; do
+          echo "Checking instance $INSTANCE_IP..."
+          
+          # Check if instance is reachable
+          if ping -c 1 -W 5 "$INSTANCE_IP" > /dev/null 2>&1; then
+            echo "✅ Instance $INSTANCE_IP is reachable"
+          else
+            echo "❌ Instance $INSTANCE_IP is not reachable via ping"
+          fi
+          
+          # Check if SSH port is open
+          if timeout 10 bash -c "echo >/dev/tcp/$INSTANCE_IP/22" 2>/dev/null; then
+            echo "✅ SSH port is open on $INSTANCE_IP"
+          else
+            echo "❌ SSH port is not open on $INSTANCE_IP"
+          fi
+        done
 
     - name: Deploy Application to All Instances
       env:
@@ -145,9 +193,16 @@ jobs:
         
         echo "Instance IPs to deploy to: $INSTANCE_IPS"
         
-        # Deploy to each instance in the Auto Scaling Group
+        SUCCESS_COUNT=0
+        TOTAL_COUNT=0
+        
+        # Deploy to each instance
         for INSTANCE_IP in $INSTANCE_IPS; do
+          echo "===================="
           echo "Deploying to instance: $INSTANCE_IP"
+          echo "===================="
+          
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
           
           # Skip if IP is empty or "None"
           if [ -z "$INSTANCE_IP" ] || [ "$INSTANCE_IP" = "None" ]; then
@@ -155,22 +210,40 @@ jobs:
             continue
           fi
           
-          # Retry logic for establishing SSH connection (up to 20 tries)
+          # Retry logic for establishing SSH connection (up to 10 tries for faster feedback)
           echo "Waiting for SSH connection to $INSTANCE_IP..."
           SSH_SUCCESS=false
           
-          for i in {1..20}; do
+          for i in {1..10}; do
             if ssh -i private_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes ubuntu@$INSTANCE_IP "echo 'SSH connection successful'" 2>/dev/null; then
-              echo "SSH connection established to $INSTANCE_IP!"
+              echo "✅ SSH connection established to $INSTANCE_IP!"
               SSH_SUCCESS=true
               break
             fi
-            echo "Waiting for SSH... attempt $i/20"
-            sleep 15
+            echo "Waiting for SSH... attempt $i/10"
+            sleep 10
           done
           
           if [ "$SSH_SUCCESS" = false ]; then
-            echo "Failed to establish SSH connection to $INSTANCE_IP after 20 attempts"
+            echo "❌ Failed to establish SSH connection to $INSTANCE_IP after 10 attempts"
+            echo "Checking what's wrong..."
+            
+            # Get instance details for debugging
+            INSTANCE_ID=$(aws ec2 describe-instances \
+              --filters "Name=private-ip-address,Values=$INSTANCE_IP" "Name=state-name,Values=running" \
+              --query 'Reservations[0].Instances[0].InstanceId' \
+              --output text 2>/dev/null || echo "unknown")
+            
+            if [ "$INSTANCE_ID" != "unknown" ] && [ "$INSTANCE_ID" != "None" ]; then
+              echo "Instance ID: $INSTANCE_ID"
+              echo "Checking system log..."
+              aws logs get-log-events \
+                --log-group-name "/aws/ec2/proxy-lamp/cloud-init" \
+                --log-stream-name "$INSTANCE_ID/cloud-init.log" \
+                --limit 10 \
+                --output text 2>/dev/null || echo "Could not retrieve cloud-init logs"
+            fi
+            
             echo "Skipping this instance and continuing with others..."
             continue
           fi
@@ -178,27 +251,29 @@ jobs:
           # Copy application files from the local repo to the EC2 instance
           echo "Deploying application files to $INSTANCE_IP..."
           if ! scp -i private_key.pem -o StrictHostKeyChecking=no -r app/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
-            echo "Failed to copy app files to $INSTANCE_IP"
+            echo "❌ Failed to copy app files to $INSTANCE_IP"
             continue
           fi
           
           if ! scp -i private_key.pem -o StrictHostKeyChecking=no -r monitoring/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
-            echo "Failed to copy monitoring files to $INSTANCE_IP"
+            echo "❌ Failed to copy monitoring files to $INSTANCE_IP"
             continue
           fi
           
           # Connect to EC2 and finalize deployment
           echo "Setting up web application on $INSTANCE_IP..."
-          ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
+          if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
             # Wait for LAMP stack setup to complete
             echo 'Waiting for LAMP stack installation to complete...'
-            timeout 600 bash -c 'while [ ! -f /var/log/cloud-init-output.log ] || ! grep -q \"LAMP Stack installation completed\" /var/log/cloud-init-output.log; do
+            timeout 300 bash -c 'while [ ! -f /var/log/cloud-init-output.log ] || ! grep -q \"LAMP Stack installation completed\" /var/log/cloud-init-output.log; do
               echo \"Still waiting for LAMP stack...\"
-              sleep 30
+              sleep 15
             done'
             
             if ! grep -q 'LAMP Stack installation completed' /var/log/cloud-init-output.log; then
               echo 'LAMP stack installation may not have completed properly'
+              echo 'Checking cloud-init status...'
+              cloud-init status || echo 'cloud-init status command failed'
               echo 'Continuing with deployment...'
             fi
             
@@ -232,10 +307,19 @@ jobs:
             echo 'Setting up cron job...'
             (crontab -l 2>/dev/null; echo '*/5 * * * * /usr/local/bin/custom-metrics.sh') | crontab - 2>/dev/null || echo 'Cron setup failed'
             
+            # Test web server
+            echo 'Testing web server...'
+            curl -s http://localhost/health.php > /dev/null && echo 'Web server is responding' || echo 'Web server test failed'
+            
             # Confirm files are in place
             echo \"Application deployment completed on $INSTANCE_IP!\"
             ls -la /var/www/html/
-          " || echo "Deployment partially failed on $INSTANCE_IP but continuing..."
+          "; then
+            echo "✅ Successfully deployed to $INSTANCE_IP"
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+          else
+            echo "❌ Deployment failed on $INSTANCE_IP"
+          fi
           
           echo "Finished deployment attempt to $INSTANCE_IP"
         done
@@ -243,56 +327,18 @@ jobs:
         # Clean up local PEM file
         rm -f private_key.pem
         
-        # Final deployment success message
-        echo "🎉 Application deployment process completed!"
-        echo "🌐 Access your load-balanced application at: http://$LOAD_BALANCER_DNS"
-
-  health_check:
-    name: 'Health Check and Monitoring Setup'
-    runs-on: ubuntu-latest
-    needs: [terraform, deploy]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
-    steps:
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Wait for Load Balancer Health Checks
-      env:
-        LOAD_BALANCER_DNS: ${{ needs.terraform.outputs.load_balancer_dns }}
-      run: |
-        echo "Waiting for load balancer health checks to pass..."
-        sleep 180  # Allow time for health checks to stabilize
+        # Final deployment summary
+        echo "===================="
+        echo "DEPLOYMENT SUMMARY"
+        echo "===================="
+        echo "Total instances: $TOTAL_COUNT"
+        echo "Successful deployments: $SUCCESS_COUNT"
+        echo "Failed deployments: $((TOTAL_COUNT - SUCCESS_COUNT))"
         
-        # Test load balancer endpoint
-        for i in {1..10}; do
-          echo "Testing load balancer... attempt $i/10"
-          if curl -f -s "http://$LOAD_BALANCER_DNS/health.php" > /dev/null; then
-            echo "✅ Load balancer health check passed!"
-            echo "🌐 Application is healthy at: http://$LOAD_BALANCER_DNS"
-            break
-          else
-            echo "⏳ Waiting for health check... attempt $i/10"
-            if [ $i -eq 10 ]; then
-              echo "❌ Health check failed after 10 attempts"
-              echo "🔍 Trying main page instead..."
-              if curl -f -s "http://$LOAD_BALANCER_DNS/" > /dev/null; then
-                echo "✅ Main application page is accessible"
-              else
-                echo "❌ Main application page is also not accessible"
-              fi
-            else
-              sleep 30
-            fi
-          fi
-        done
-        
-        # Final verification
-        echo "Final application test:"
-        curl -s "http://$LOAD_BALANCER_DNS/health.php" || echo "Health check endpoint not responding"
-        curl -s "http://$LOAD_BALANCER_DNS/" > /dev/null && echo "✅ Main application is accessible" || echo "❌ Main application is not accessible"
-        echo "Deployment completed! 🚀"
+        if [ $SUCCESS_COUNT -gt 0 ]; then
+          echo "🎉 Application deployed successfully to $SUCCESS_COUNT instance(s)!"
+          echo "🌐 Access your load-balanced application at: http://$LOAD_BALANCER_DNS"
+        else
+          echo "❌ All deployments failed!"
+          exit 1
+        fi

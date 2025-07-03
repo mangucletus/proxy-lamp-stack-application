@@ -1,119 +1,202 @@
 #!/bin/bash
-# ASG Debug Script - Run this to check what's happening with your deployment
+# Debug script for Auto Scaling Group issues
 
 set -e
 
-echo "🔍 Debugging Auto Scaling Group Issues..."
+# Configuration
+ASG_NAME="proxy-lamp-asg-60111207"  # Your ASG name from the logs
+REGION="eu-central-1"
 
-cd terraform
-
-# Get ASG name
-ASG_NAME=$(terraform output -raw autoscaling_group_name 2>/dev/null || echo "")
-if [ -z "$ASG_NAME" ]; then
-    echo "❌ Could not get ASG name from Terraform. Make sure terraform apply completed for basic resources."
-    exit 1
-fi
-
-echo "✅ Auto Scaling Group: $ASG_NAME"
-
-# Check ASG status
+echo "=== Auto Scaling Group Debug Script ==="
+echo "ASG Name: $ASG_NAME"
+echo "Region: $REGION"
 echo ""
-echo "📊 ASG Status:"
-aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME" \
-    --query 'AutoScalingGroups[0].{MinSize:MinSize,MaxSize:MaxSize,DesiredCapacity:DesiredCapacity,HealthCheckType:HealthCheckType,HealthCheckGracePeriod:HealthCheckGracePeriod}' \
-    --output table
 
-# Check instances in ASG
+# 1. Check if ASG exists and get basic info
+echo "1. Auto Scaling Group Overview:"
+aws autoscaling describe-auto-scaling-groups \
+  --region "$REGION" \
+  --auto-scaling-group-names "$ASG_NAME" \
+  --query 'AutoScalingGroups[0].{MinSize:MinSize,MaxSize:MaxSize,DesiredCapacity:DesiredCapacity,HealthCheckType:HealthCheckType,HealthCheckGracePeriod:HealthCheckGracePeriod}' \
+  --output table
+
 echo ""
-echo "🖥️  Instances in ASG:"
-INSTANCES=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME" \
-    --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,State:LifecycleState,Health:HealthStatus,AZ:AvailabilityZone}' \
-    --output table)
+
+# 2. Check all instances in ASG
+echo "2. All Instances in ASG:"
+INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+  --region "$REGION" \
+  --auto-scaling-group-names "$ASG_NAME" \
+  --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,State:LifecycleState,Health:HealthStatus,AZ:AvailabilityZone,LaunchTime:CreatedTime}' \
+  --output table)
 
 echo "$INSTANCES"
 
-# Get instance IDs
-INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME" \
-    --query 'AutoScalingGroups[0].Instances[*].InstanceId' --output text)
+# 3. Get instance IDs for further investigation
+INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+  --region "$REGION" \
+  --auto-scaling-group-names "$ASG_NAME" \
+  --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+  --output text)
 
-if [ -n "$INSTANCE_IDS" ]; then
-    echo ""
-    echo "🔍 Instance Details:"
-    for INSTANCE_ID in $INSTANCE_IDS; do
-        echo ""
-        echo "--- Instance: $INSTANCE_ID ---"
-        
-        # Get instance status
-        INSTANCE_STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
-            --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
-        echo "EC2 State: $INSTANCE_STATE"
-        
-        # Get instance checks
-        STATUS_CHECKS=$(aws ec2 describe-instance-status --instance-ids "$INSTANCE_ID" \
-            --query 'InstanceStatuses[0].{SystemStatus:SystemStatus.Status,InstanceStatus:InstanceStatus.Status}' \
-            --output table 2>/dev/null || echo "No status checks available")
-        echo "Status Checks:"
-        echo "$STATUS_CHECKS"
-        
-        # Get user data logs if possible (via Systems Manager)
-        echo "Checking user data execution..."
-        aws ssm send-command --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["tail -20 /var/log/cloud-init-output.log"]' \
-            --query 'Command.CommandId' --output text >/dev/null 2>&1 && \
-            echo "✅ SSM available - check AWS Console for user data logs" || \
-            echo "❌ SSM not available - check EC2 Console for logs"
-        
-        # Try to get public IP for SSH
-        PUBLIC_IP=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
-            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null || echo "None")
-        if [ "$PUBLIC_IP" != "None" ] && [ "$PUBLIC_IP" != "null" ]; then
-            echo "Public IP: $PUBLIC_IP"
-            echo "SSH Command: ssh -i your-private-key.pem ubuntu@$PUBLIC_IP"
-            echo "Health Check: curl http://$PUBLIC_IP/health.php"
-        fi
-    done
-else
-    echo "❌ No instances found in ASG!"
+if [ -z "$INSTANCE_IDS" ]; then
+  echo "❌ No instances found in ASG!"
+  echo ""
+  echo "Possible causes:"
+  echo "1. Launch template issues"
+  echo "2. No capacity in availability zones"
+  echo "3. Service limits reached"
+  echo "4. IAM permissions issues"
+  echo ""
+  
+  # Check launch template
+  LAUNCH_TEMPLATE_ID=$(aws autoscaling describe-auto-scaling-groups \
+    --region "$REGION" \
+    --auto-scaling-group-names "$ASG_NAME" \
+    --query 'AutoScalingGroups[0].LaunchTemplate.LaunchTemplateId' \
+    --output text)
+  
+  echo "Launch Template ID: $LAUNCH_TEMPLATE_ID"
+  
+  if [ "$LAUNCH_TEMPLATE_ID" != "None" ]; then
+    echo "Launch Template Details:"
+    aws ec2 describe-launch-templates \
+      --region "$REGION" \
+      --launch-template-ids "$LAUNCH_TEMPLATE_ID" \
+      --query 'LaunchTemplates[0].{Name:LaunchTemplateName,LatestVersion:LatestVersionNumber,CreatedBy:CreatedBy}' \
+      --output table
+  fi
+  
+  exit 1
 fi
 
-# Check Load Balancer Target Health
 echo ""
-echo "🎯 Load Balancer Target Health:"
-TG_ARN=$(terraform output -raw load_balancer_arn 2>/dev/null | sed 's/.*loadbalancer/targetgroup/' | sed 's/loadbalancer.*//')
-if [ -n "$TG_ARN" ]; then
-    # This might fail, but let's try
-    LB_DNS=$(terraform output -raw load_balancer_dns 2>/dev/null || echo "")
-    echo "Load Balancer DNS: $LB_DNS"
+echo "3. Instance Details:"
+for INSTANCE_ID in $INSTANCE_IDS; do
+  echo "--- Instance: $INSTANCE_ID ---"
+  
+  # Get instance details
+  aws ec2 describe-instances \
+    --region "$REGION" \
+    --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[0].Instances[0].{State:State.Name,PublicIP:PublicIpAddress,PrivateIP:PrivateIpAddress,LaunchTime:LaunchTime,InstanceType:InstanceType}' \
+    --output table
+  
+  # Get instance status checks
+  echo "Status Checks:"
+  aws ec2 describe-instance-status \
+    --region "$REGION" \
+    --instance-ids "$INSTANCE_ID" \
+    --query 'InstanceStatuses[0].{SystemStatus:SystemStatus.Status,InstanceStatus:InstanceStatus.Status}' \
+    --output table 2>/dev/null || echo "Status checks not available yet"
+  
+  echo ""
+done
+
+echo ""
+echo "4. Checking Cloud-Init Logs (if available):"
+for INSTANCE_ID in $INSTANCE_IDS; do
+  echo "--- Cloud-Init logs for $INSTANCE_ID ---"
+  
+  # Try to get cloud-init logs from CloudWatch
+  aws logs describe-log-streams \
+    --region "$REGION" \
+    --log-group-name "/aws/ec2/proxy-lamp/cloud-init" \
+    --log-stream-name-prefix "$INSTANCE_ID" \
+    --query 'logStreams[0].logStreamName' \
+    --output text 2>/dev/null | while read LOG_STREAM; do
     
-    # Get target group from ALB
-    ALB_ARN=$(terraform output -raw load_balancer_arn 2>/dev/null || echo "")
-    if [ -n "$ALB_ARN" ]; then
-        TARGET_GROUPS=$(aws elbv2 describe-target-groups --load-balancer-arn "$ALB_ARN" \
-            --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
-        
-        if [ -n "$TARGET_GROUPS" ] && [ "$TARGET_GROUPS" != "None" ]; then
-            echo "Target Group Health:"
-            aws elbv2 describe-target-health --target-group-arn "$TARGET_GROUPS" \
-                --query 'TargetHealthDescriptions[*].{Target:Target.Id,Port:Target.Port,Health:TargetHealth.State,Reason:TargetHealth.Reason}' \
-                --output table 2>/dev/null || echo "Could not get target health"
-        fi
+    if [ "$LOG_STREAM" != "None" ] && [ -n "$LOG_STREAM" ]; then
+      echo "Latest cloud-init log entries:"
+      aws logs get-log-events \
+        --region "$REGION" \
+        --log-group-name "/aws/ec2/proxy-lamp/cloud-init" \
+        --log-stream-name "$LOG_STREAM" \
+        --limit 20 \
+        --query 'events[*].message' \
+        --output text 2>/dev/null || echo "Could not retrieve logs"
+    else
+      echo "No cloud-init logs found for $INSTANCE_ID"
     fi
+  done
+  
+  echo ""
+done
+
+echo ""
+echo "5. Auto Scaling Activities (last 10):"
+aws autoscaling describe-scaling-activities \
+  --region "$REGION" \
+  --auto-scaling-group-name "$ASG_NAME" \
+  --max-items 10 \
+  --query 'Activities[*].{Time:StartTime,Status:StatusCode,Description:Description,Cause:Cause}' \
+  --output table
+
+echo ""
+echo "6. Health Check Configuration:"
+aws autoscaling describe-auto-scaling-groups \
+  --region "$REGION" \
+  --auto-scaling-group-names "$ASG_NAME" \
+  --query 'AutoScalingGroups[0].{HealthCheckType:HealthCheckType,HealthCheckGracePeriod:HealthCheckGracePeriod,DefaultCooldown:DefaultCooldown}' \
+  --output table
+
+echo ""
+echo "7. Target Group Health (if ELB health checks):"
+TARGET_GROUP_ARNS=$(aws autoscaling describe-auto-scaling-groups \
+  --region "$REGION" \
+  --auto-scaling-group-names "$ASG_NAME" \
+  --query 'AutoScalingGroups[0].TargetGroupARNs[*]' \
+  --output text)
+
+if [ -n "$TARGET_GROUP_ARNS" ]; then
+  for TG_ARN in $TARGET_GROUP_ARNS; do
+    echo "Target Group: $TG_ARN"
+    aws elbv2 describe-target-health \
+      --region "$REGION" \
+      --target-group-arn "$TG_ARN" \
+      --query 'TargetHealthDescriptions[*].{Target:Target.Id,Health:TargetHealth.State,Description:TargetHealth.Description}' \
+      --output table 2>/dev/null || echo "Could not get target health"
+  done
 else
-    echo "Could not determine target group ARN"
+  echo "No target groups attached"
 fi
 
 echo ""
-echo "🔧 Troubleshooting Tips:"
-echo "1. Check instance user data logs in EC2 Console"
-echo "2. SSH to instances and check Apache status: systemctl status apache2"
-echo "3. Test health endpoint manually: curl http://localhost/health.php"
-echo "4. Check security groups allow port 80 from load balancer"
-echo "5. Verify database connectivity if app requires it"
+echo "=== Recommendations ==="
 echo ""
-echo "📝 Common Issues:"
-echo "- User data script failing (check /var/log/cloud-init-output.log)"
-echo "- Health check path not responding (check Apache/PHP setup)"
-echo "- Security group blocking health checks"
-echo "- Database connection issues"
-echo "- AMI compatibility problems"
+
+# Analyze the situation and provide recommendations
+INSTANCE_COUNT=$(echo "$INSTANCE_IDS" | wc -w)
+if [ "$INSTANCE_COUNT" -eq 0 ]; then
+  echo "❌ No instances in ASG - Check launch template and capacity"
+else
+  echo "✅ Found $INSTANCE_COUNT instance(s) in ASG"
+  
+  # Check if any instances are in InService state
+  INSERVICE_COUNT=$(aws autoscaling describe-auto-scaling-groups \
+    --region "$REGION" \
+    --auto-scaling-group-names "$ASG_NAME" \
+    --query 'length(AutoScalingGroups[0].Instances[?LifecycleState==`InService`])' \
+    --output text)
+  
+  if [ "$INSERVICE_COUNT" -eq 0 ]; then
+    echo "❌ No instances are InService"
+    echo ""
+    echo "Common causes and solutions:"
+    echo "1. User data script failing - Check cloud-init logs above"
+    echo "2. Health check failing - Increase grace period or check target group health"
+    echo "3. Still launching - Wait longer (user data can take 10-15 minutes)"
+    echo ""
+    echo "Quick fixes to try:"
+    echo "1. Increase health check grace period:"
+    echo "   aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --health-check-grace-period 1200"
+    echo ""
+    echo "2. Force instance refresh:"
+    echo "   aws autoscaling start-instance-refresh --auto-scaling-group-name $ASG_NAME"
+  else
+    echo "✅ $INSERVICE_COUNT instance(s) are InService"
+  fi
+fi
+
+echo ""
+echo "Debug script completed!"

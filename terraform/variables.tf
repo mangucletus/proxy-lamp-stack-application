@@ -50,7 +50,7 @@ variable "max_size" {
 variable "desired_capacity" {
   description = "Desired number of instances in Auto Scaling Group"
   type        = number
-  default     = 3
+  default     = 2
 }
 
 # Database configuration variables
