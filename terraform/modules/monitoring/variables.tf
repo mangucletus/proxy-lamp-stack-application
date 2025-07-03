@@ -93,32 +93,6 @@ variable "slack_webhook_url" {
   sensitive   = true
 }
 
-# Application Insights configuration
-variable "enable_application_insights" {
-  description = "Enable AWS Application Insights"
-  type        = bool
-  default     = true
-}
-
-variable "auto_config_enabled" {
-  description = "Enable automatic configuration for Application Insights"
-  type        = bool
-  default     = true
-}
-
-# Anomaly detection configuration
-variable "enable_anomaly_detection" {
-  description = "Enable CloudWatch anomaly detection"
-  type        = bool
-  default     = true
-}
-
-variable "anomaly_evaluation_periods" {
-  description = "Number of evaluation periods for anomaly detection"
-  type        = number
-  default     = 2
-}
-
 # Dashboard configuration
 variable "dashboard_refresh_interval" {
   description = "Dashboard refresh interval in seconds"

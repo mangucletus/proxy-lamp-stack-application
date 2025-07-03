@@ -75,28 +75,6 @@ output "logs_insights_queries" {
   }
 }
 
-# Application Insights
-output "application_insights_name" {
-  description = "Name of the Application Insights application"
-  value       = aws_applicationinsights_application.proxy_lamp_insights.resource_group_name
-}
-
-output "application_insights_arn" {
-  description = "ARN of the Application Insights application"
-  value       = aws_applicationinsights_application.proxy_lamp_insights.arn
-}
-
-# Resource Group
-output "resource_group_arn" {
-  description = "ARN of the resource group"
-  value       = aws_resourcegroups_group.proxy_lamp_rg.arn
-}
-
-output "resource_group_name" {
-  description = "Name of the resource group"
-  value       = aws_resourcegroups_group.proxy_lamp_rg.name
-}
-
 # Metric Filters
 output "metric_filters" {
   description = "CloudWatch metric filter names"
@@ -113,7 +91,6 @@ output "monitoring_urls" {
     dashboard = "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${aws_cloudwatch_dashboard.proxy_lamp_dashboard.dashboard_name}"
     logs      = "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#logsV2:logs-insights"
     alarms    = "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#alarmsV2:alarms"
-    insights  = "https://${data.aws_region.current.name}.console.aws.amazon.com/systems-manager/appinsights/application/${aws_applicationinsights_application.proxy_lamp_insights.resource_group_name}/insights"
   }
 }
 
@@ -127,8 +104,7 @@ output "monitoring_summary" {
     sns_topics_count      = 2
     metric_filters_count  = 2
     logs_insights_queries = 3
-    application_insights_enabled = true
-    resource_group_name   = aws_resourcegroups_group.proxy_lamp_rg.name
+    application_insights_enabled = false
     region               = data.aws_region.current.name
     account_id           = data.aws_caller_identity.current.account_id
   }

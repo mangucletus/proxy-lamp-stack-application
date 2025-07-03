@@ -322,36 +322,6 @@ fields @timestamp, @message
 EOF
 }
 
-# Application Insights
-resource "aws_applicationinsights_application" "proxy_lamp_insights" {
-  resource_group_name = aws_resourcegroups_group.proxy_lamp_rg.name
-  auto_config_enabled = true
-  auto_create         = true
-
-  tags = merge(var.tags, {
-    Name = "proxy-lamp-insights-${var.deployment_suffix}"
-  })
-}
-
-# Resource Group for Application Insights
-resource "aws_resourcegroups_group" "proxy_lamp_rg" {
-  name = "proxy-lamp-resources-${var.deployment_suffix}"
-
-  resource_query {
-    query = jsonencode({
-      ResourceTypeFilters = ["AWS::AllSupported"]
-      TagFilters = [
-        {
-          Key    = "Project"
-          Values = [var.tags["Project"]]
-        }
-      ]
-    })
-  }
-
-  tags = var.tags
-}
-
 # Custom CloudWatch Metrics Namespace
 resource "aws_cloudwatch_log_metric_filter" "error_count" {
   name           = "proxy-lamp-error-count-${var.deployment_suffix}"

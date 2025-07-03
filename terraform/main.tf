@@ -113,4 +113,5 @@ module "monitoring" {
   db_instance_identifier   = module.database.db_instance_identifier
   deployment_suffix        = local.deployment_suffix
   tags                     = local.common_tags
+
 }
