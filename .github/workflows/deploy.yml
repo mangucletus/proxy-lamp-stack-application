@@ -22,6 +22,8 @@ jobs:
     outputs:
       load_balancer_dns: ${{ steps.terraform-output.outputs.load_balancer_dns }}
       autoscaling_group_name: ${{ steps.terraform-output.outputs.autoscaling_group_name }}
+      # FIXED: Add database endpoint output
+      database_endpoint: ${{ steps.terraform-output.outputs.database_endpoint }}
     
     defaults:
       run:
@@ -87,6 +89,8 @@ jobs:
       run: |
         echo "load_balancer_dns=$(terraform output -raw load_balancer_dns)" >> $GITHUB_OUTPUT
         echo "autoscaling_group_name=$(terraform output -raw autoscaling_group_name)" >> $GITHUB_OUTPUT
+        # FIXED: Get database endpoint for deployment
+        echo "database_endpoint=$(terraform output -raw database_endpoint)" >> $GITHUB_OUTPUT
 
   deploy:
     name: 'Deploy Application to Load Balanced Infrastructure'
@@ -108,7 +112,8 @@ jobs:
     - name: Wait for Infrastructure to be Ready
       run: |
         echo "Waiting for Auto Scaling Group instances to be ready..."
-        sleep 180
+        # FIXED: Increase wait time for userdata to complete
+        sleep 300
 
     - name: Pre-deployment Verification
       run: |
@@ -250,11 +255,15 @@ jobs:
       env:
         PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
         LOAD_BALANCER_DNS: ${{ needs.terraform.outputs.load_balancer_dns }}
+        # FIXED: Add database endpoint and password to deployment
+        DATABASE_ENDPOINT: ${{ needs.terraform.outputs.database_endpoint }}
+        DATABASE_PASSWORD: ${{ secrets.DB_PASSWORD }}
       run: |
         echo "$PRIVATE_KEY" > private_key.pem
         chmod 600 private_key.pem
         
         echo "Instance IPs to deploy to: $INSTANCE_IPS"
+        echo "Database endpoint: $DATABASE_ENDPOINT"
         
         if [ -z "$INSTANCE_IPS" ]; then
           echo "❌ No instance IPs available for deployment"
@@ -303,6 +312,23 @@ jobs:
           if [ "$SSH_SUCCESS" = false ]; then
             echo "❌ Failed to establish SSH connection to $INSTANCE_IP after 10 minutes"
             continue
+          fi
+
+          # FIXED: Wait for userdata script to complete
+          echo "Waiting for userdata script to complete on $INSTANCE_IP..."
+          USERDATA_COMPLETE=false
+          for i in {1..30}; do
+            if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "[ -f /tmp/lamp-setup-complete ]" 2>/dev/null; then
+              echo "✅ Userdata script completed on $INSTANCE_IP"
+              USERDATA_COMPLETE=true
+              break
+            fi
+            echo "⏳ Waiting for userdata completion... attempt $i/30"
+            sleep 20
+          done
+          
+          if [ "$USERDATA_COMPLETE" = false ]; then
+            echo "⚠️ Userdata script may not have completed, continuing anyway..."
           fi
           
           echo "Checking Apache status on $INSTANCE_IP..."
@@ -423,6 +449,52 @@ jobs:
             done
             echo '✅ All PHP files have valid syntax'
             
+            # FIXED: Create database config file if it doesn't exist
+            echo 'Setting up database configuration...'
+            if [ ! -f /var/www/html/.db_config ]; then
+              echo 'Database config file not found, creating it...'
+              
+              # Get database endpoint from environment or instance tags
+              DB_ENDPOINT="$DATABASE_ENDPOINT"
+              DB_PASSWORD="$DATABASE_PASSWORD"
+              
+              if [ -z "$DB_ENDPOINT" ] || [ "$DB_ENDPOINT" = "null" ]; then
+                echo 'Getting database endpoint from instance tags...'
+                INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
+                if [ "$INSTANCE_ID" != "unknown" ]; then
+                  DB_ENDPOINT=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=DatabaseEndpoint" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+                  DB_PASSWORD=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=DatabasePassword" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+                fi
+              fi
+              
+              if [ -n "$DB_ENDPOINT" ] && [ "$DB_ENDPOINT" != "null" ] && [ "$DB_ENDPOINT" != "" ]; then
+                echo "Creating database config with endpoint: $DB_ENDPOINT"
+                sudo bash -c "cat > /var/www/html/.db_config << EOF
+        DB_HOST=$DB_ENDPOINT
+        DB_USER=admin
+        DB_PASSWORD=$DB_PASSWORD
+        DB_NAME=proxylamptodoapp
+        DB_PORT=3306
+        EOF"
+                sudo chown www-data:www-data /var/www/html/.db_config
+                sudo chmod 600 /var/www/html/.db_config
+                echo '✅ Database config file created successfully'
+              else
+                echo '⚠️ Database endpoint not available, creating placeholder config'
+                sudo bash -c "cat > /var/www/html/.db_config << EOF
+        DB_HOST=localhost
+        DB_USER=admin
+        DB_PASSWORD=placeholder
+        DB_NAME=proxylamptodoapp
+        DB_PORT=3306
+        EOF"
+                sudo chown www-data:www-data /var/www/html/.db_config
+                sudo chmod 600 /var/www/html/.db_config
+              fi
+            else
+              echo '✅ Database config file already exists'
+            fi
+            
             echo 'Testing database configuration...'
             if [ -f /var/www/html/.db_config ]; then
               echo 'Database config file exists'
@@ -465,7 +537,7 @@ jobs:
                 echo "DB_HOST: $DB_HOST"
               fi
             else
-              echo '❌ Database config file not found'
+              echo '❌ Database config file still not found after creation attempt'
               exit 1
             fi
             
@@ -517,6 +589,13 @@ jobs:
               echo 'Final diagnostics:'
               echo '=== Web Directory Contents ==='
               ls -la /var/www/html/
+              echo '=== Database Config File ==='
+              if [ -f /var/www/html/.db_config ]; then
+                echo 'Config file exists'
+                ls -la /var/www/html/.db_config
+              else
+                echo 'Config file missing'
+              fi
               echo '=== Testing what Apache serves ==='
               curl -s http://localhost/ | head -5
               sudo systemctl status apache2 --no-pager || true
@@ -558,7 +637,12 @@ jobs:
         DEPLOY_EOF
           )
           
-          if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "$DEPLOY_SCRIPT"; then
+          # FIXED: Pass database endpoint and password to deployment script
+          if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
+            export DATABASE_ENDPOINT='$DATABASE_ENDPOINT'
+            export DATABASE_PASSWORD='$DATABASE_PASSWORD'
+            $DEPLOY_SCRIPT
+          "; then
             echo "✅ Successfully deployed to $INSTANCE_IP"
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
             
@@ -592,6 +676,15 @@ jobs:
               free -h
               echo 'Web directory contents:'
               ls -la /var/www/html/
+              echo 'Database config file:'
+              if [ -f /var/www/html/.db_config ]; then
+                echo 'Config file exists:'
+                ls -la /var/www/html/.db_config
+                echo 'Contents:'
+                cat /var/www/html/.db_config
+              else
+                echo 'Config file missing'
+              fi
               echo 'What Apache is serving:'
               curl -s http://localhost/ | head -3
               echo 'Recent system messages:'

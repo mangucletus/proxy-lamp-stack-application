@@ -5,6 +5,18 @@ exec > >(tee /var/log/user-data.log) 2>&1
 
 echo "=== STARTING LAMP SETUP $(date) ==="
 
+# FIXED: Get and log Terraform variables early
+DB_ENDPOINT="${db_endpoint}"
+DB_PASSWORD="${db_password}"
+AWS_REGION="${aws_region}"
+DEPLOYMENT_SUFFIX="${deployment_suffix}"
+
+echo "=== TERRAFORM VARIABLES ==="
+echo "DB_ENDPOINT: $DB_ENDPOINT"
+echo "AWS_REGION: $AWS_REGION"
+echo "DEPLOYMENT_SUFFIX: $DEPLOYMENT_SUFFIX"
+echo "DB_PASSWORD: [REDACTED]"
+
 # Update packages first
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
@@ -173,43 +185,101 @@ fi
 INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
 REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "eu-central-1")
 
-# FIXED: Database configuration (non-blocking) with better error handling
-DB_ENDPOINT_FINAL="${db_endpoint}"
-DB_PASSWORD_FINAL="${db_password}"
+echo "Instance ID: $INSTANCE_ID"
+echo "Region: $REGION"
 
-echo "Setting up database configuration..."
-echo "Database endpoint: $DB_ENDPOINT_FINAL"
+# FIXED: Enhanced Database configuration with multiple fallback methods
+echo "=== SETTING UP DATABASE CONFIGURATION ==="
 
-# Create database config file with validation
+# Method 1: Use Terraform variables (primary method)
+echo "Method 1: Using Terraform template variables"
+echo "DB_ENDPOINT from template: '$DB_ENDPOINT'"
+
+if [ -n "$DB_ENDPOINT" ] && [ "$DB_ENDPOINT" != "null" ] && [ "$DB_ENDPOINT" != "\${db_endpoint}" ] && [ "$DB_ENDPOINT" != "" ]; then
+    echo "✅ Valid database endpoint from Terraform: $DB_ENDPOINT"
+    DB_HOST_FINAL="$DB_ENDPOINT"
+    DB_PASSWORD_FINAL="$DB_PASSWORD"
+else
+    echo "⚠️ Database endpoint from Terraform is invalid or empty"
+    
+    # Method 2: Try to get from instance tags
+    echo "Method 2: Attempting to get database endpoint from instance tags"
+    if [ "$INSTANCE_ID" != "unknown" ]; then
+        DB_HOST_FROM_TAGS=$(aws ec2 describe-tags --region "$REGION" --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=DatabaseEndpoint" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+        DB_PASSWORD_FROM_TAGS=$(aws ec2 describe-tags --region "$REGION" --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=DatabasePassword" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+        
+        if [ -n "$DB_HOST_FROM_TAGS" ] && [ "$DB_HOST_FROM_TAGS" != "None" ] && [ "$DB_HOST_FROM_TAGS" != "null" ]; then
+            echo "✅ Found database endpoint in instance tags: $DB_HOST_FROM_TAGS"
+            DB_HOST_FINAL="$DB_HOST_FROM_TAGS"
+            DB_PASSWORD_FINAL="$DB_PASSWORD_FROM_TAGS"
+        else
+            echo "⚠️ No valid database endpoint found in instance tags"
+            
+            # Method 3: Try to find RDS instances with our deployment suffix
+            echo "Method 3: Searching for RDS instances with deployment suffix"
+            if [ -n "$DEPLOYMENT_SUFFIX" ] && [ "$DEPLOYMENT_SUFFIX" != "null" ]; then
+                RDS_ENDPOINT=$(aws rds describe-db-instances --region "$REGION" --query "DBInstances[?contains(DBInstanceIdentifier, '$DEPLOYMENT_SUFFIX')].Endpoint.Address" --output text 2>/dev/null || echo "")
+                if [ -n "$RDS_ENDPOINT" ] && [ "$RDS_ENDPOINT" != "None" ]; then
+                    echo "✅ Found RDS instance: $RDS_ENDPOINT"
+                    DB_HOST_FINAL="$RDS_ENDPOINT"
+                    DB_PASSWORD_FINAL="$DB_PASSWORD"
+                else
+                    echo "⚠️ No RDS instances found with deployment suffix"
+                    
+                    # Method 4: Fallback to placeholder
+                    echo "Method 4: Using placeholder configuration"
+                    DB_HOST_FINAL="localhost"
+                    DB_PASSWORD_FINAL="placeholder"
+                fi
+            else
+                echo "⚠️ No deployment suffix available"
+                DB_HOST_FINAL="localhost"
+                DB_PASSWORD_FINAL="placeholder"
+            fi
+        fi
+    else
+        echo "⚠️ Instance ID not available, using placeholder"
+        DB_HOST_FINAL="localhost"
+        DB_PASSWORD_FINAL="placeholder"
+    fi
+fi
+
+echo "Final database configuration:"
+echo "DB_HOST_FINAL: $DB_HOST_FINAL"
+echo "DB_PASSWORD_FINAL: [REDACTED]"
+
+# FIXED: Create database config file with validation
 mkdir -p /var/www/html
-if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "\${db_endpoint}" ]; then
-    cat > /var/www/html/.db_config << EOF
-DB_HOST=$DB_ENDPOINT_FINAL
+
+echo "Creating database configuration file..."
+cat > /var/www/html/.db_config << EOF
+DB_HOST=$DB_HOST_FINAL
 DB_USER=admin
 DB_PASSWORD=$DB_PASSWORD_FINAL
 DB_NAME=proxylamptodoapp
 DB_PORT=3306
 EOF
-    chown www-data:www-data /var/www/html/.db_config
-    chmod 600 /var/www/html/.db_config
-    echo "✅ Database config file created"
+
+# Set proper ownership and permissions
+chown www-data:www-data /var/www/html/.db_config
+chmod 600 /var/www/html/.db_config
+
+echo "✅ Database config file created successfully"
+echo "Database config file contents:"
+ls -la /var/www/html/.db_config
+
+# Verify the file was created and is readable
+if [ -f /var/www/html/.db_config ]; then
+    echo "✅ Database config file exists and is readable"
+    echo "File permissions: $(ls -la /var/www/html/.db_config)"
 else
-    echo "⚠️ Database endpoint not provided or invalid"
-    # Create a placeholder config
-    cat > /var/www/html/.db_config << EOF
-DB_HOST=localhost
-DB_USER=admin
-DB_PASSWORD=placeholder
-DB_NAME=proxylamptodoapp
-DB_PORT=3306
-EOF
-    chown www-data:www-data /var/www/html/.db_config
-    chmod 600 /var/www/html/.db_config
+    echo "❌ Database config file creation failed"
+    exit 1
 fi
 
-# Add to Apache environment
+# FIXED: Add database connection info to Apache environment (for backup)
 cat >> /etc/apache2/envvars << EOF
-export DB_HOST="$DB_ENDPOINT_FINAL"
+export DB_HOST="$DB_HOST_FINAL"
 export DB_USER="admin"
 export DB_PASSWORD="$DB_PASSWORD_FINAL"
 export DB_NAME="proxylamptodoapp"
@@ -218,18 +288,18 @@ EOF
 
 # FIXED: Test database connection in background (non-blocking with better error handling)
 (
-    echo "Testing database connection..."
+    echo "=== TESTING DATABASE CONNECTION ==="
     DB_CONNECTION_SUCCESS=false
     
-    for i in {1..30}; do
-        if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "\${db_endpoint}" ] && [ "$DB_ENDPOINT_FINAL" != "localhost" ]; then
-            echo "Attempting database connection to $DB_ENDPOINT_FINAL (attempt $i/30)..."
+    if [ "$DB_HOST_FINAL" != "localhost" ] && [ "$DB_HOST_FINAL" != "placeholder" ]; then
+        for i in {1..30}; do
+            echo "Attempting database connection to $DB_HOST_FINAL (attempt $i/30)..."
             
-            if timeout 10 mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" -e "SELECT 1;" >/dev/null 2>&1; then
+            if timeout 10 mysql -h "$DB_HOST_FINAL" -u admin -p"$DB_PASSWORD_FINAL" -e "SELECT 1;" >/dev/null 2>&1; then
                 echo "✅ Database connection successful"
                 
                 # Create database and table
-                mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" << 'MYSQL_EOF'
+                mysql -h "$DB_HOST_FINAL" -u admin -p"$DB_PASSWORD_FINAL" << 'MYSQL_EOF'
 CREATE DATABASE IF NOT EXISTS proxylamptodoapp;
 USE proxylamptodoapp;
 CREATE TABLE IF NOT EXISTS tasks (
@@ -250,18 +320,19 @@ MYSQL_EOF
                 break
             else
                 echo "Database connection attempt $i/30 failed"
-                sleep 20
+                if [ $i -lt 30 ]; then
+                    sleep 20
+                fi
             fi
-        else
-            echo "Invalid database endpoint, skipping connection test"
-            break
+        done
+        
+        if [ "$DB_CONNECTION_SUCCESS" = "false" ]; then
+            echo "⚠️ Database connection failed after 30 attempts"
+            echo "Database endpoint: $DB_HOST_FINAL"
+            echo "This may be normal during initial setup - the application will retry"
         fi
-    done
-    
-    if [ "$DB_CONNECTION_SUCCESS" = "false" ]; then
-        echo "⚠️ Database connection failed after 30 attempts"
-        echo "Database endpoint: $DB_ENDPOINT_FINAL"
-        echo "This may be normal during initial setup - the application will retry"
+    else
+        echo "⚠️ Database endpoint is placeholder or localhost, skipping connection test"
     fi
 ) &
 
@@ -324,8 +395,19 @@ net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl -p >/dev/null 2>&1 || echo "⚠️ sysctl reload failed"
 
+# FIXED: Wait for background processes to complete (with timeout)
+echo "Waiting for background processes to complete..."
+for i in {1..30}; do
+    BACKGROUND_JOBS=$(jobs -r | wc -l)
+    if [ "$BACKGROUND_JOBS" -eq 0 ]; then
+        echo "✅ All background processes completed"
+        break
+    fi
+    echo "⏳ Waiting for $BACKGROUND_JOBS background processes... ($i/30)"
+    sleep 10
+done
+
 # FIXED: Final comprehensive verification
-sleep 5
 echo "=== FINAL VERIFICATION ==="
 
 # Check Apache status
@@ -379,21 +461,65 @@ else
     echo "❌ Health endpoint is not accessible"
 fi
 
+# FIXED: Verify database config file one more time
+if [ -f /var/www/html/.db_config ]; then
+    echo "✅ Database config file exists"
+    echo "File details:"
+    ls -la /var/www/html/.db_config
+    echo "File owner can read: $(sudo -u www-data test -r /var/www/html/.db_config && echo 'yes' || echo 'no')"
+else
+    echo "❌ Database config file missing - attempting to recreate"
+    # Recreate the config file
+    cat > /var/www/html/.db_config << EOF
+DB_HOST=$DB_HOST_FINAL
+DB_USER=admin
+DB_PASSWORD=$DB_PASSWORD_FINAL
+DB_NAME=proxylamptodoapp
+DB_PORT=3306
+EOF
+    chown www-data:www-data /var/www/html/.db_config
+    chmod 600 /var/www/html/.db_config
+    echo "✅ Database config file recreated"
+fi
+
 # Ensure proper permissions one more time
 chown -R www-data:www-data /var/www/html
 chmod 755 /var/www/html
-chmod 644 /var/www/html/*
+chmod 644 /var/www/html/*.php 2>/dev/null || echo "No PHP files to set permissions"
+chmod 644 /var/www/html/*.css 2>/dev/null || echo "No CSS files to set permissions"
+chmod 600 /var/www/html/.db_config 2>/dev/null || echo "No .db_config file to set permissions"
+
+# FIXED: Create final completion marker with more info
+cat > /tmp/lamp-setup-complete << EOF
+LAMP Setup Completed: $(date)
+Database endpoint: $DB_HOST_FINAL
+Apache status: $(systemctl is-active apache2)
+PHP status: $(php -v | head -1)
+Config file exists: $([ -f /var/www/html/.db_config ] && echo 'yes' || echo 'no')
+EOF
 
 echo "=== LAMP SETUP COMPLETED $(date) ==="
 
+# Final status report
+echo "=== SETUP STATUS REPORT ==="
+echo "✅ Apache: $(systemctl is-active apache2)"
+echo "✅ PHP: $(php -v | head -1)"
+echo "✅ Database config: $([ -f /var/www/html/.db_config ] && echo 'exists' || echo 'missing')"
+echo "✅ Database endpoint: $DB_HOST_FINAL"
+echo "✅ Health endpoint: $(curl -s -f http://localhost/health.php >/dev/null && echo 'working' || echo 'not working')"
+
 # Final check and report
-if systemctl is-active --quiet apache2 && curl -s -f http://localhost/ >/dev/null; then
-    echo "🎉 SUCCESS: LAMP stack is fully operational"
+if systemctl is-active --quiet apache2 && curl -s -f http://localhost/ >/dev/null && [ -f /var/www/html/.db_config ]; then
+    echo "🎉 SUCCESS: LAMP stack is fully operational with database configuration"
     echo "📄 Apache DirectoryIndex configured to prioritize PHP files"
     echo "🗄️ Database configuration prepared"
     echo "⏳ Ready for application deployment"
     exit 0
 else
     echo "⚠️ WARNING: LAMP stack may have issues but setup completed"
+    echo "Issues detected:"
+    systemctl is-active --quiet apache2 || echo "- Apache not running"
+    curl -s -f http://localhost/ >/dev/null || echo "- Apache not responding"
+    [ -f /var/www/html/.db_config ] || echo "- Database config file missing"
     exit 0  # Don't fail the entire instance launch
 fi
