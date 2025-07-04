@@ -138,7 +138,8 @@ DB_PORT=3306
 EOF
 
 chown www-data:www-data /var/www/html/.db_config
-chmod 600 /var/www/html/.db_config
+chmod 640 /var/www/html/.db_config
+usermod -aG www-data ubuntu
 
 # Add to Apache environment
 cat >> /etc/apache2/envvars << EOF
@@ -228,7 +229,7 @@ DB_NAME=proxylamptodoapp
 DB_PORT=3306
 EOF
     chown www-data:www-data /var/www/html/.db_config
-    chmod 600 /var/www/html/.db_config
+    chmod 640 /var/www/html/.db_config
 fi
 
 # Final permissions
@@ -236,7 +237,7 @@ chown -R www-data:www-data /var/www/html
 chmod 755 /var/www/html
 chmod 644 /var/www/html/*.php 2>/dev/null || true
 chmod 644 /var/www/html/*.css 2>/dev/null || true
-chmod 600 /var/www/html/.db_config 2>/dev/null || true
+chmod 640 /var/www/html/.db_config 2>/dev/null || true
 
 # Create completion marker
 cat > /tmp/lamp-setup-complete << EOF

@@ -471,7 +471,7 @@ jobs:
         DB_PORT=3306
         EOF"
                 sudo chown www-data:www-data /var/www/html/.db_config
-                sudo chmod 600 /var/www/html/.db_config
+                sudo chmod 640 /var/www/html/.db_config
                 echo '✅ Database config file created successfully'
               else
                 echo '⚠️ Database endpoint not available, using existing config from userdata'
