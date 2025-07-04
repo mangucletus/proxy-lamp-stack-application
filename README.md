@@ -8,7 +8,9 @@
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/features/actions)
 
 ## Live Application
-**Access the Load-Balanced To-Do App: http://your-load-balancer-dns/**
+**Access the Load-Balanced To-Do App: http://proxy-lamp-alb-52fd7e74-716748987.eu-central-1.elb.amazonaws.com/**
+
+**Access the Health Checks here: http://proxy-lamp-alb-52fd7e74-716748987.eu-central-1.elb.amazonaws.com/health.php**
 
 > A production-ready, highly available LAMP stack application deployed on AWS with Application Load Balancer, Auto Scaling, RDS MySQL, comprehensive monitoring, logging, and observability using Infrastructure as Code (IaC) with Terraform and automated CI/CD with GitHub Actions.
 

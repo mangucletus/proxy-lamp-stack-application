@@ -75,43 +75,11 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
 </head>
 <body>
-    <!-- Health indicator for load balancer status -->
-    <div class="health-indicator" title="System Status: Healthy"></div>
-    
-    <!-- Load balancer badge -->
-    <div class="lb-badge" title="Load Balanced Instance">LB</div>
-    
-    <!-- Performance metrics bar -->
-    <div class="metrics-bar">
-        <div class="metric-item">
-            <span class="metric-label">Server:</span>
-            <span class="metric-value"><?php echo htmlspecialchars($server_name); ?></span>
-        </div>
-        <div class="metric-item">
-            <span class="metric-label">IP:</span>
-            <span class="metric-value"><?php echo htmlspecialchars($server_ip); ?></span>
-        </div>
-        <div class="metric-item">
-            <span class="metric-label">Via:</span>
-            <span class="metric-value"><?php echo htmlspecialchars($load_balancer_info); ?></span>
-        </div>
-        <div class="metric-item">
-            <span class="metric-label">Tasks:</span>
-            <span class="metric-value"><?php echo $stats['total_tasks'] ?? 0; ?></span>
-        </div>
-    </div>
-
     <div class="container">
         <!-- Page header with title and description -->
         <header>
-            <h1>🚀 Proxy LAMP Stack To-Do Application</h1>
+            <h2>Proxy LAMP Stack To-Do Application</h2>
             <p>High-Availability LAMP Stack with Load Balancer, Auto-Scaling, RDS MySQL, and Comprehensive Monitoring on AWS</p>
-            <div class="architecture-info">
-                <span>🔄 Load Balanced</span>
-                <span>📈 Auto Scaling</span>
-                <span>🗄️ RDS MySQL</span>
-                <span>📊 CloudWatch</span>
-            </div>
         </header>
 
         <!-- Display success/error messages -->
@@ -220,55 +188,22 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
                 <div class="no-tasks">
                     <div class="no-tasks-icon">📝</div>
                     <h3>No tasks yet!</h3>
-                    <p>Add your first task above to get started with your high-availability to-do list.</p>
-                    <div class="no-tasks-features">
-                        <div class="feature">✨ Load balanced for high availability</div>
-                        <div class="feature">🔄 Auto-scaling based on demand</div>
-                        <div class="feature">🗄️ Backed by RDS MySQL</div>
-                        <div class="feature">📊 Comprehensive monitoring</div>
-                    </div>
+                    <p>Add your first task above to get started!</p>
                 </div>
             <?php endif; ?>
-        </div>
-
-        <!-- System information section -->
-        <div class="system-info">
-            <h3>🏗️ System Architecture</h3>
-            <div class="architecture-grid">
-                <div class="arch-item">
-                    <div class="arch-icon">⚖️</div>
-                    <div class="arch-title">Load Balancer</div>
-                    <div class="arch-desc">Application Load Balancer distributes traffic</div>
-                </div>
-                <div class="arch-item">
-                    <div class="arch-icon">📈</div>
-                    <div class="arch-title">Auto Scaling</div>
-                    <div class="arch-desc">Scales 2-6 instances based on demand</div>
-                </div>
-                <div class="arch-item">
-                    <div class="arch-icon">🗄️</div>
-                    <div class="arch-title">RDS MySQL</div>
-                    <div class="arch-desc">Managed database with automated backups</div>
-                </div>
-                <div class="arch-item">
-                    <div class="arch-icon">📊</div>
-                    <div class="arch-title">CloudWatch</div>
-                    <div class="arch-desc">Comprehensive monitoring and alerting</div>
-                </div>
-            </div>
         </div>
 
         <!-- Footer with deployment note -->
         <footer>
             <div class="footer-content">
                 <div class="deployment-info">
-                    <p>🚀 Deployed on AWS with Terraform Infrastructure as Code</p>
-                    <p>🔄 CI/CD Pipeline powered by GitHub Actions</p>
+                    <p>Deployed on AWS with Terraform Infrastructure as Code</p>
+                    <p>CI/CD Pipeline powered by GitHub Actions</p>
                 </div>
                 <div class="footer-links">
                     <a href="health.php" target="_blank" title="System Health Check">🔍 Health Check</a>
                     <span class="separator">|</span>
-                    <a href="https://github.com/yourusername/proxy-lamp-stack-application" target="_blank" title="View Source Code">📦 Source Code</a>
+                    <a href="https://github.com/mangucletus/proxy-lamp-stack-application" target="_blank" title="View Source Code">📦 Source Code</a>
                 </div>
             </div>
         </footer>
