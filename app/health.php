@@ -1,11 +1,12 @@
 <?php
 // ----------------------------------------
-// Health Check Endpoint for Load Balancer
+// Enhanced Health Check Endpoint for Load Balancer
 // ----------------------------------------
 
-// Set content type to JSON
+// Set content type to JSON and disable caching
 header('Content-Type: application/json');
 header('Cache-Control: no-cache, must-revalidate');
+header('Access-Control-Allow-Origin: *');
 
 // Start timing the health check
 $start_time = microtime(true);
@@ -21,17 +22,28 @@ $health = [
 ];
 
 // ----------------------------------------
-// Basic System Health Checks
+// PHP Environment Health Checks
 // ----------------------------------------
 
-// Check PHP version
 $health['checks']['php'] = [
     'status' => 'healthy',
     'version' => PHP_VERSION,
+    'sapi' => php_sapi_name(),
     'memory_limit' => ini_get('memory_limit'),
-    'memory_usage' => memory_get_usage(true),
-    'memory_peak' => memory_get_peak_usage(true)
+    'memory_usage' => round(memory_get_usage(true) / (1024 * 1024), 2) . 'MB',
+    'memory_peak' => round(memory_get_peak_usage(true) / (1024 * 1024), 2) . 'MB',
+    'max_execution_time' => ini_get('max_execution_time'),
+    'extensions' => [
+        'mysqli' => extension_loaded('mysqli'),
+        'curl' => extension_loaded('curl'),
+        'json' => extension_loaded('json'),
+        'mbstring' => extension_loaded('mbstring')
+    ]
 ];
+
+// ----------------------------------------
+// System Health Checks
+// ----------------------------------------
 
 // Check disk space
 $disk_free = disk_free_space('/');
@@ -45,33 +57,46 @@ $health['checks']['disk'] = [
     'total_space_gb' => round($disk_total / (1024 * 1024 * 1024), 2)
 ];
 
+// Check system load if available
+if (function_exists('sys_getloadavg')) {
+    $load = sys_getloadavg();
+    $load_status = 'healthy';
+    if ($load[0] > 2.0) {
+        $load_status = $load[0] > 4.0 ? 'critical' : 'warning';
+    }
+    
+    $health['checks']['system_load'] = [
+        'status' => $load_status,
+        'load_1min' => round($load[0], 2),
+        'load_5min' => round($load[1], 2),
+        'load_15min' => round($load[2], 2)
+    ];
+}
+
 // ----------------------------------------
 // Apache Web Server Health Check
 // ----------------------------------------
 
 try {
-    // Check if Apache is responding
     $apache_status = 'healthy';
-    
-    // Try to get Apache server status (if mod_status is enabled)
     $apache_info = [];
+    
+    // Get Apache version if available
     if (function_exists('apache_get_version')) {
         $apache_info['version'] = apache_get_version();
     }
     
-    // Check server load if available
-    if (function_exists('sys_getloadavg')) {
-        $load = sys_getloadavg();
-        $apache_info['load_average'] = [
-            '1min' => round($load[0], 2),
-            '5min' => round($load[1], 2),
-            '15min' => round($load[2], 2)
-        ];
-        
-        // Mark as warning if load is high
-        if ($load[0] > 2.0) {
-            $apache_status = $load[0] > 4.0 ? 'critical' : 'warning';
-        }
+    // Check if we can determine Apache is running
+    if (isset($_SERVER['SERVER_SOFTWARE'])) {
+        $apache_info['server_software'] = $_SERVER['SERVER_SOFTWARE'];
+    }
+    
+    // Check request headers for load balancer info
+    if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $apache_info['behind_load_balancer'] = true;
+        $apache_info['forwarded_for'] = $_SERVER['HTTP_X_FORWARDED_FOR'];
+    } else {
+        $apache_info['behind_load_balancer'] = false;
     }
     
     $health['checks']['apache'] = [
@@ -81,127 +106,120 @@ try {
     
 } catch (Exception $e) {
     $health['checks']['apache'] = [
-        'status' => 'unhealthy',
+        'status' => 'warning',
         'error' => $e->getMessage()
     ];
-    $health['status'] = 'degraded'; // Don't fail completely for Apache issues
 }
 
 // ----------------------------------------
-// Database Connection Health Check (NON-BLOCKING)
+// Database Connection Health Check
 // ----------------------------------------
 
-try {
-    // Try to include database configuration, but don't fail if it doesn't exist
-    $db_config_exists = false;
-    if (file_exists('config.php')) {
-        // Capture any errors from config.php without stopping execution
+$db_config_file = '/var/www/html/.db_config';
+$config_file_exists = file_exists('config.php');
+
+if ($config_file_exists) {
+    try {
+        // Capture output to prevent interference with JSON response
         ob_start();
-        $error_level = error_reporting(0); // Suppress errors temporarily
+        $error_level = error_reporting(0);
         
-        try {
-            include_once 'config.php';
-            $db_config_exists = true;
-        } catch (Exception $e) {
-            // Config file has issues, but don't fail the health check
-            error_log("Database config error: " . $e->getMessage());
-        }
+        // Try to include config and test database
+        include_once 'config.php';
         
-        error_reporting($error_level); // Restore error reporting
+        error_reporting($error_level);
         ob_end_clean();
-    }
-    
-    if ($db_config_exists && isset($conn) && $conn instanceof mysqli) {
-        $db_start_time = microtime(true);
         
-        // Test basic connection
-        if ($conn->connect_error) {
-            throw new Exception("Connection failed: " . $conn->connect_error);
-        }
-        
-        // Test database query with timeout
-        $conn->options(MYSQLI_OPT_READ_TIMEOUT, 5); // 5 second timeout
-        $result = $conn->query("SELECT 1 as health_check, NOW() as server_time");
-        
-        if (!$result) {
-            throw new Exception("Query failed: " . $conn->error);
-        }
-        
-        $row = $result->fetch_assoc();
-        $db_response_time = round((microtime(true) - $db_start_time) * 1000, 2);
-        
-        // Check database performance
-        $db_status = 'healthy';
-        if ($db_response_time > 1000) {
-            $db_status = 'warning'; // Response time > 1 second
-        }
-        if ($db_response_time > 3000) {
-            $db_status = 'critical'; // Response time > 3 seconds
-        }
-        
-        $health['checks']['database'] = [
-            'status' => $db_status,
-            'response_time_ms' => $db_response_time,
-            'server_time' => $row['server_time'],
-            'connection_id' => $conn->thread_id,
-            'server_version' => $conn->server_info,
-        ];
-        
-        // Test application table (non-blocking)
-        try {
-            $table_check = $conn->query("SELECT COUNT(*) as task_count FROM tasks LIMIT 1");
-            if ($table_check) {
-                $table_row = $table_check->fetch_assoc();
-                $health['checks']['application'] = [
-                    'status' => 'healthy',
-                    'tasks_table' => 'accessible',
-                    'total_tasks' => $table_row['task_count']
-                ];
-            } else {
+        if (isset($conn) && $conn instanceof mysqli) {
+            $db_start_time = microtime(true);
+            
+            // Test basic connection
+            if ($conn->connect_error) {
+                throw new Exception("Connection failed: " . $conn->connect_error);
+            }
+            
+            // Test database query with timeout
+            $conn->options(MYSQLI_OPT_READ_TIMEOUT, 3);
+            $result = $conn->query("SELECT 1 as health_check, NOW() as server_time, VERSION() as db_version");
+            
+            if (!$result) {
+                throw new Exception("Query failed: " . $conn->error);
+            }
+            
+            $row = $result->fetch_assoc();
+            $db_response_time = round((microtime(true) - $db_start_time) * 1000, 2);
+            
+            $db_status = 'healthy';
+            if ($db_response_time > 1000) {
+                $db_status = 'warning';
+            }
+            if ($db_response_time > 3000) {
+                $db_status = 'critical';
+            }
+            
+            $health['checks']['database'] = [
+                'status' => $db_status,
+                'response_time_ms' => $db_response_time,
+                'server_time' => $row['server_time'],
+                'server_version' => $row['db_version'],
+                'connection_id' => $conn->thread_id,
+                'host_info' => $conn->host_info
+            ];
+            
+            // Test application tables
+            try {
+                $table_result = $conn->query("SELECT COUNT(*) as task_count FROM tasks LIMIT 1");
+                if ($table_result) {
+                    $table_row = $table_result->fetch_assoc();
+                    $health['checks']['application'] = [
+                        'status' => 'healthy',
+                        'tasks_table' => 'accessible',
+                        'total_tasks' => (int)$table_row['task_count']
+                    ];
+                } else {
+                    $health['checks']['application'] = [
+                        'status' => 'warning',
+                        'tasks_table' => 'not_accessible',
+                        'error' => $conn->error
+                    ];
+                }
+            } catch (Exception $e) {
                 $health['checks']['application'] = [
                     'status' => 'warning',
-                    'tasks_table' => 'not_accessible',
-                    'error' => $conn->error
+                    'tasks_table' => 'error',
+                    'error' => $e->getMessage()
                 ];
             }
-        } catch (Exception $e) {
-            $health['checks']['application'] = [
-                'status' => 'warning',
-                'tasks_table' => 'error',
-                'error' => $e->getMessage()
-            ];
+            
+        } else {
+            throw new Exception("Database connection object not available");
         }
         
-    } else {
-        // Database config doesn't exist or is not loaded - this is OK for initial health checks
+    } catch (Exception $e) {
         $health['checks']['database'] = [
             'status' => 'warning',
-            'message' => 'Database configuration not available or not loaded',
-            'config_exists' => $db_config_exists
+            'error' => $e->getMessage(),
+            'config_file_exists' => $config_file_exists,
+            'db_config_file_exists' => file_exists($db_config_file)
         ];
         
         $health['checks']['application'] = [
             'status' => 'warning',
-            'message' => 'Application database not configured yet'
+            'error' => 'Database connectivity issues'
         ];
     }
-    
-} catch (Exception $e) {
-    // Database issues shouldn't fail the entire health check
+} else {
     $health['checks']['database'] = [
         'status' => 'warning',
-        'error' => $e->getMessage()
+        'message' => 'Database configuration file not found',
+        'config_file_exists' => false,
+        'db_config_file_exists' => file_exists($db_config_file)
     ];
     
     $health['checks']['application'] = [
         'status' => 'warning',
-        'error' => 'Database connectivity issues'
+        'message' => 'Application not fully configured'
     ];
-    
-    // Only mark as degraded, not unhealthy
-    if ($health['status'] === 'healthy') {
-        $health['status'] = 'warning';
-    }
 }
 
 // ----------------------------------------
@@ -209,21 +227,40 @@ try {
 // ----------------------------------------
 
 try {
-    // Check if we can write to the temp directory
+    $required_files = ['index.php', 'config.php', 'add.php', 'delete.php', 'styles.css'];
+    $missing_files = [];
+    $file_permissions = [];
+    
+    foreach ($required_files as $file) {
+        if (file_exists($file)) {
+            $file_permissions[$file] = [
+                'exists' => true,
+                'readable' => is_readable($file),
+                'size' => filesize($file)
+            ];
+        } else {
+            $missing_files[] = $file;
+            $file_permissions[$file] = ['exists' => false];
+        }
+    }
+    
+    // Test write capability
     $test_file = '/tmp/health_check_' . time() . '.tmp';
     $write_test = file_put_contents($test_file, 'health check test');
     
     if ($write_test !== false) {
-        unlink($test_file); // Clean up test file
-        $filesystem_status = 'healthy';
+        unlink($test_file);
+        $filesystem_status = empty($missing_files) ? 'healthy' : 'warning';
     } else {
-        $filesystem_status = 'unhealthy';
+        $filesystem_status = 'critical';
     }
     
     $health['checks']['filesystem'] = [
         'status' => $filesystem_status,
         'writable' => $write_test !== false,
-        'document_root' => $_SERVER['DOCUMENT_ROOT'] ?? 'unknown'
+        'missing_files' => $missing_files,
+        'file_permissions' => $file_permissions,
+        'document_root' => $_SERVER['DOCUMENT_ROOT'] ?? '/var/www/html'
     ];
     
 } catch (Exception $e) {
@@ -234,50 +271,45 @@ try {
 }
 
 // ----------------------------------------
-// Application Files Check
+// Network and Request Health Check
 // ----------------------------------------
 
-$required_files = ['index.php', 'config.php'];
-$missing_files = [];
-$file_status = 'healthy';
-
-foreach ($required_files as $file) {
-    if (!file_exists($file)) {
-        $missing_files[] = $file;
-    }
-}
-
-if (!empty($missing_files)) {
-    $file_status = 'warning';
-}
-
-$health['checks']['application_files'] = [
-    'status' => $file_status,
-    'required_files' => $required_files,
-    'missing_files' => $missing_files,
-    'document_root_files' => glob('*.php') ?: []
+$health['checks']['network'] = [
+    'status' => 'healthy',
+    'server_addr' => $_SERVER['SERVER_ADDR'] ?? 'unknown',
+    'server_port' => $_SERVER['SERVER_PORT'] ?? 'unknown',
+    'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'unknown',
+    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
+    'remote_addr' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+    'request_uri' => $_SERVER['REQUEST_URI'] ?? 'unknown'
 ];
 
 // ----------------------------------------
 // Calculate Overall Health Status
 // ----------------------------------------
 
-// Only fail if critical systems are down
-$critical_checks = ['php', 'filesystem'];
-$warning_checks = ['disk', 'apache'];
+$status_priorities = [
+    'critical' => 4,
+    'unhealthy' => 3,
+    'warning' => 2,
+    'degraded' => 1,
+    'healthy' => 0
+];
+
+$overall_priority = 0;
+$overall_status = 'healthy';
 
 foreach ($health['checks'] as $check_name => $check_result) {
-    if ($check_result['status'] === 'unhealthy' || $check_result['status'] === 'critical') {
-        if (in_array($check_name, $critical_checks)) {
-            $health['status'] = 'unhealthy';
-            break;
-        } else {
-            $health['status'] = 'degraded';
-        }
-    } elseif ($check_result['status'] === 'warning' && $health['status'] === 'healthy') {
-        $health['status'] = 'warning';
+    $check_status = $check_result['status'];
+    $priority = $status_priorities[$check_status] ?? 0;
+    
+    if ($priority > $overall_priority) {
+        $overall_priority = $priority;
+        $overall_status = $check_status;
     }
 }
+
+$health['status'] = $overall_status;
 
 // ----------------------------------------
 // Add Performance Metrics
@@ -287,7 +319,8 @@ $end_time = microtime(true);
 $health['performance'] = [
     'response_time_ms' => round(($end_time - $start_time) * 1000, 2),
     'memory_usage_mb' => round(memory_get_usage(true) / (1024 * 1024), 2),
-    'peak_memory_mb' => round(memory_get_peak_usage(true) / (1024 * 1024), 2)
+    'peak_memory_mb' => round(memory_get_peak_usage(true) / (1024 * 1024), 2),
+    'cpu_time_ms' => round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']) * 1000, 2)
 ];
 
 // ----------------------------------------
@@ -296,13 +329,14 @@ $health['performance'] = [
 
 switch ($health['status']) {
     case 'healthy':
-    case 'warning':
         http_response_code(200);
         break;
+    case 'warning':
     case 'degraded':
         http_response_code(200); // Still return 200 for load balancer
         break;
     case 'unhealthy':
+    case 'critical':
         http_response_code(503); // Service Unavailable
         break;
     default:
@@ -317,16 +351,33 @@ $health['instance'] = [
     'hostname' => gethostname(),
     'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
     'php_sapi' => php_sapi_name(),
-    'request_time' => $_SERVER['REQUEST_TIME'] ?? time(),
-    'request_id' => uniqid('req_', true)
+    'request_time' => date('c', $_SERVER['REQUEST_TIME']),
+    'uptime' => function_exists('sys_getloadavg') ? 'available' : 'unavailable',
+    'timezone' => date_default_timezone_get()
+];
+
+// ----------------------------------------
+// Add Load Balancer Information
+// ----------------------------------------
+
+$health['load_balancer'] = [
+    'behind_proxy' => !empty($_SERVER['HTTP_X_FORWARDED_FOR']),
+    'forwarded_for' => $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null,
+    'forwarded_proto' => $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? null,
+    'real_ip' => $_SERVER['HTTP_X_REAL_IP'] ?? null,
+    'original_host' => $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? 'unknown'
 ];
 
 // ----------------------------------------
 // Output Health Check Response
 // ----------------------------------------
 
-// Pretty print JSON for debugging
-echo json_encode($health, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+// Pretty print JSON for debugging, minified for production
+if (isset($_GET['pretty']) || isset($_GET['debug'])) {
+    echo json_encode($health, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+} else {
+    echo json_encode($health, JSON_UNESCAPED_SLASHES);
+}
 
 // ----------------------------------------
 // Clean up resources
