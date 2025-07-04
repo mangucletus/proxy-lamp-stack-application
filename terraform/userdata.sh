@@ -23,6 +23,15 @@ a2enmod headers
 a2enmod ssl
 a2enmod remoteip  # FIXED: This was missing - required for RemoteIPHeader
 
+# FIXED: Configure Apache DirectoryIndex to prioritize PHP files
+echo "Configuring Apache DirectoryIndex to prioritize PHP..."
+cat > /etc/apache2/conf-available/directory-index.conf << 'EOF'
+# Prioritize PHP files over HTML files
+DirectoryIndex index.php index.html index.htm
+EOF
+
+a2enconf directory-index
+
 # FIXED: Start Apache immediately and ensure it's running
 systemctl enable apache2
 systemctl start apache2
@@ -37,25 +46,44 @@ for i in {1..10}; do
     sleep 2
 done
 
-# FIXED: Create simple loading page immediately
+# FIXED: Create simple loading page - BUT use different name to avoid conflicts
+cat > /var/www/html/loading.html << 'EOF'
+<!DOCTYPE html>
+<html><head><title>LAMP Setup</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{background:white;padding:30px;border-radius:10px}</style>
+</head><body><div class="container"><h1>🚀 LAMP Stack Setup</h1><p>✅ Apache: Running</p><p>✅ PHP: Running</p><p>⏳ Waiting for application deployment...</p><p>Server: HOSTNAME</p></div></body></html>
+EOF
+sed -i "s/HOSTNAME/$(hostname)/g" /var/www/html/loading.html
+
+# FIXED: Create a minimal index.html that will be replaced by deployment
 cat > /var/www/html/index.html << 'EOF'
 <!DOCTYPE html>
-<html><head><title>LAMP Ready</title>
+<html><head><title>LAMP Ready</title><meta http-equiv="refresh" content="10">
 <style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{background:white;padding:30px;border-radius:10px}</style>
-</head><body><div class="container"><h1>🚀 LAMP Stack Ready</h1><p>✅ Apache: Running</p><p>✅ PHP: Running</p><p>⏳ Application: Loading</p><p>Server: HOSTNAME</p></div></body></html>
+</head><body><div class="container"><h1>🚀 LAMP Stack Ready</h1><p>✅ Apache: Running</p><p>✅ PHP: Running</p><p>⏳ Application: Loading</p><p>Server: HOSTNAME</p><p><small>This page will be replaced when the application deploys</small></p></div></body></html>
 EOF
 sed -i "s/HOSTNAME/$(hostname)/g" /var/www/html/index.html
 
-# FIXED: Create health endpoint immediately
+# FIXED: Create health endpoint immediately with better error handling
 cat > /var/www/html/health.php << 'EOF'
 <?php
 header('Content-Type: application/json');
-echo json_encode([
-    'status' => 'healthy',
-    'timestamp' => date('c'),
-    'server' => gethostname(),
-    'services' => ['apache' => 'running', 'php' => 'running']
-]);
+try {
+    echo json_encode([
+        'status' => 'healthy',
+        'timestamp' => date('c'),
+        'server' => gethostname(),
+        'services' => ['apache' => 'running', 'php' => 'running'],
+        'setup_stage' => 'initial'
+    ]);
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode([
+        'status' => 'error',
+        'error' => $e->getMessage(),
+        'server' => gethostname()
+    ]);
+}
 ?>
 EOF
 
@@ -145,21 +173,39 @@ fi
 INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
 REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "eu-central-1")
 
-# FIXED: Database configuration (non-blocking)
+# FIXED: Database configuration (non-blocking) with better error handling
 DB_ENDPOINT_FINAL="${db_endpoint}"
 DB_PASSWORD_FINAL="${db_password}"
 
-# Create database config file
+echo "Setting up database configuration..."
+echo "Database endpoint: $DB_ENDPOINT_FINAL"
+
+# Create database config file with validation
 mkdir -p /var/www/html
-cat > /var/www/html/.db_config << EOF
+if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "\${db_endpoint}" ]; then
+    cat > /var/www/html/.db_config << EOF
 DB_HOST=$DB_ENDPOINT_FINAL
 DB_USER=admin
 DB_PASSWORD=$DB_PASSWORD_FINAL
 DB_NAME=proxylamptodoapp
 DB_PORT=3306
 EOF
-chown www-data:www-data /var/www/html/.db_config
-chmod 600 /var/www/html/.db_config
+    chown www-data:www-data /var/www/html/.db_config
+    chmod 600 /var/www/html/.db_config
+    echo "✅ Database config file created"
+else
+    echo "⚠️ Database endpoint not provided or invalid"
+    # Create a placeholder config
+    cat > /var/www/html/.db_config << EOF
+DB_HOST=localhost
+DB_USER=admin
+DB_PASSWORD=placeholder
+DB_NAME=proxylamptodoapp
+DB_PORT=3306
+EOF
+    chown www-data:www-data /var/www/html/.db_config
+    chmod 600 /var/www/html/.db_config
+fi
 
 # Add to Apache environment
 cat >> /etc/apache2/envvars << EOF
@@ -170,13 +216,19 @@ export DB_NAME="proxylamptodoapp"
 export DB_PORT="3306"
 EOF
 
-# FIXED: Test database connection in background (non-blocking)
+# FIXED: Test database connection in background (non-blocking with better error handling)
 (
     echo "Testing database connection..."
-    for i in {1..20}; do
-        if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "proxy-lamp-mysql-endpoint" ]; then
-            if mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" -e "SELECT 1;" >/dev/null 2>&1; then
+    DB_CONNECTION_SUCCESS=false
+    
+    for i in {1..30}; do
+        if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "\${db_endpoint}" ] && [ "$DB_ENDPOINT_FINAL" != "localhost" ]; then
+            echo "Attempting database connection to $DB_ENDPOINT_FINAL (attempt $i/30)..."
+            
+            if timeout 10 mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" -e "SELECT 1;" >/dev/null 2>&1; then
                 echo "✅ Database connection successful"
+                
+                # Create database and table
                 mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" << 'MYSQL_EOF'
 CREATE DATABASE IF NOT EXISTS proxylamptodoapp;
 USE proxylamptodoapp;
@@ -189,14 +241,28 @@ CREATE TABLE IF NOT EXISTS tasks (
     INDEX idx_created_at (created_at),
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Insert a test record
+INSERT INTO tasks (task) VALUES ('Welcome to your Proxy LAMP Stack application!') ON DUPLICATE KEY UPDATE task=task;
 MYSQL_EOF
-                echo "✅ Database and table created"
+                echo "✅ Database and table created with test data"
+                DB_CONNECTION_SUCCESS=true
                 break
+            else
+                echo "Database connection attempt $i/30 failed"
+                sleep 20
             fi
+        else
+            echo "Invalid database endpoint, skipping connection test"
+            break
         fi
-        echo "Database connection attempt $i/20..."
-        sleep 15
     done
+    
+    if [ "$DB_CONNECTION_SUCCESS" = "false" ]; then
+        echo "⚠️ Database connection failed after 30 attempts"
+        echo "Database endpoint: $DB_ENDPOINT_FINAL"
+        echo "This may be normal during initial setup - the application will retry"
+    fi
 ) &
 
 # FIXED: Install CloudWatch agent in background (non-blocking)
@@ -258,40 +324,6 @@ net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl -p >/dev/null 2>&1 || echo "⚠️ sysctl reload failed"
 
-# FIXED: Create a comprehensive status page
-cat > /var/www/html/status.html << 'EOF'
-<!DOCTYPE html>
-<html><head><title>Server Status</title>
-<meta http-equiv="refresh" content="30">
-<style>
-body{font-family:Arial;margin:20px;background:#f5f5f5}
-.container{background:white;padding:20px;border-radius:10px;margin-bottom:20px}
-.status{display:inline-block;padding:5px 10px;border-radius:15px;color:white;font-weight:bold}
-.healthy{background:#28a745}
-.warning{background:#ffc107;color:#000}
-.error{background:#dc3545}
-</style>
-</head><body>
-<div class="container">
-<h1>🖥️ Server Status</h1>
-<p><strong>Hostname:</strong> HOSTNAME</p>
-<p><strong>Instance ID:</strong> INSTANCE_ID</p>
-<p><strong>Apache:</strong> <span class="status healthy">Running</span></p>
-<p><strong>PHP:</strong> <span class="status healthy">Running</span></p>
-<p><strong>Last Updated:</strong> <span id="timestamp">TIMESTAMP</span></p>
-</div>
-<div class="container">
-<h2>🔗 Quick Links</h2>
-<p><a href="/">Main Application</a> | <a href="/health.php">Health Check</a> | <a href="/server-status">Server Status</a></p>
-</div>
-</body></html>
-EOF
-
-# Replace placeholders
-sed -i "s/HOSTNAME/$(hostname)/g" /var/www/html/status.html
-sed -i "s/INSTANCE_ID/$INSTANCE_ID/g" /var/www/html/status.html
-sed -i "s/TIMESTAMP/$(date)/g" /var/www/html/status.html
-
 # FIXED: Final comprehensive verification
 sleep 5
 echo "=== FINAL VERIFICATION ==="
@@ -347,16 +379,7 @@ else
     echo "❌ Health endpoint is not accessible"
 fi
 
-# Update final status page
-cat > /var/www/html/index.html << 'EOF'
-<!DOCTYPE html>
-<html><head><title>LAMP Stack Ready</title><meta http-equiv="refresh" content="30">
-<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{background:white;padding:30px;border-radius:10px}</style>
-</head><body><div class="container"><h1>🚀 LAMP Stack Ready</h1><p>✅ Apache: Running</p><p>✅ PHP: Running</p><p>✅ Ready for application deployment</p><p>Server: HOSTNAME</p><p><a href="/health.php">Health Check</a> | <a href="/status.html">Server Status</a></p></div></body></html>
-EOF
-sed -i "s/HOSTNAME/$(hostname)/g" /var/www/html/index.html
-
-# Ensure proper permissions
+# Ensure proper permissions one more time
 chown -R www-data:www-data /var/www/html
 chmod 755 /var/www/html
 chmod 644 /var/www/html/*
@@ -366,6 +389,9 @@ echo "=== LAMP SETUP COMPLETED $(date) ==="
 # Final check and report
 if systemctl is-active --quiet apache2 && curl -s -f http://localhost/ >/dev/null; then
     echo "🎉 SUCCESS: LAMP stack is fully operational"
+    echo "📄 Apache DirectoryIndex configured to prioritize PHP files"
+    echo "🗄️ Database configuration prepared"
+    echo "⏳ Ready for application deployment"
     exit 0
 else
     echo "⚠️ WARNING: LAMP stack may have issues but setup completed"
