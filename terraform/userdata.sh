@@ -1,5 +1,5 @@
 #!/bin/bash
-# FIXED: Robust EC2 User Data Script for Proxy LAMP Stack
+# FIXED: Enhanced EC2 User Data Script with Proper Database Configuration
 set -e
 exec > >(tee /var/log/user-data.log) 2>&1
 
@@ -9,62 +9,43 @@ echo "=== STARTING LAMP SETUP $(date) ==="
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 
-# FIXED: Install core packages in smaller batches to avoid timeouts
+# Install core packages
 echo "Installing Apache and PHP..."
 apt-get install -y apache2 php libapache2-mod-php php-mysql php-cli php-common php-mbstring php-xml php-curl php-json
 
 echo "Installing additional tools..."
 apt-get install -y mysql-client-core-8.0 awscli htop curl jq unzip
 
-# FIXED: Enable required Apache modules BEFORE creating configuration
+# Enable required Apache modules
 echo "Enabling required Apache modules..."
 a2enmod rewrite
 a2enmod headers
 a2enmod ssl
-a2enmod remoteip  # FIXED: This was missing - required for RemoteIPHeader
+a2enmod remoteip
+a2enmod status
 
-# FIXED: Configure Apache DirectoryIndex to prioritize PHP files
+# Configure Apache DirectoryIndex to prioritize PHP files
 echo "Configuring Apache DirectoryIndex to prioritize PHP..."
 cat > /etc/apache2/conf-available/directory-index.conf << 'EOF'
-# Prioritize PHP files over HTML files
 DirectoryIndex index.php index.html index.htm
 EOF
-
 a2enconf directory-index
 
-# FIXED: Start Apache immediately and ensure it's running
+# Start Apache
 systemctl enable apache2
 systemctl start apache2
 
-# FIXED: Wait for Apache to be fully ready
+# Wait for Apache to be ready
 for i in {1..10}; do
     if systemctl is-active --quiet apache2; then
-        echo "Apache is running"
+        echo "✅ Apache is running"
         break
     fi
     echo "Waiting for Apache to start... attempt $i"
     sleep 2
 done
 
-# FIXED: Create simple loading page - BUT use different name to avoid conflicts
-cat > /var/www/html/loading.html << 'EOF'
-<!DOCTYPE html>
-<html><head><title>LAMP Setup</title>
-<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{background:white;padding:30px;border-radius:10px}</style>
-</head><body><div class="container"><h1>🚀 LAMP Stack Setup</h1><p>✅ Apache: Running</p><p>✅ PHP: Running</p><p>⏳ Waiting for application deployment...</p><p>Server: HOSTNAME</p></div></body></html>
-EOF
-sed -i "s/HOSTNAME/$(hostname)/g" /var/www/html/loading.html
-
-# FIXED: Create a minimal index.html that will be replaced by deployment
-cat > /var/www/html/index.html << 'EOF'
-<!DOCTYPE html>
-<html><head><title>LAMP Ready</title><meta http-equiv="refresh" content="10">
-<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{background:white;padding:30px;border-radius:10px}</style>
-</head><body><div class="container"><h1>🚀 LAMP Stack Ready</h1><p>✅ Apache: Running</p><p>✅ PHP: Running</p><p>⏳ Application: Loading</p><p>Server: HOSTNAME</p><p><small>This page will be replaced when the application deploys</small></p></div></body></html>
-EOF
-sed -i "s/HOSTNAME/$(hostname)/g" /var/www/html/index.html
-
-# FIXED: Create health endpoint immediately with better error handling
+# Create basic health endpoint immediately
 cat > /var/www/html/health.php << 'EOF'
 <?php
 header('Content-Type: application/json');
@@ -92,48 +73,32 @@ chown -R www-data:www-data /var/www/html
 chmod 755 /var/www/html
 chmod 644 /var/www/html/*
 
-# FIXED: Test Apache immediately
+# Test Apache immediately
 if curl -s -f http://localhost/ > /dev/null; then
     echo "✅ Apache is responding"
 else
     echo "❌ Apache test failed - restarting Apache"
     systemctl restart apache2
     sleep 5
-    
-    # Test again
-    if curl -s -f http://localhost/ > /dev/null; then
-        echo "✅ Apache is responding after restart"
-    else
-        echo "❌ Apache still not responding - checking status"
-        systemctl status apache2 --no-pager
-    fi
 fi
 
-# FIXED: Create completion marker early for health checks
-touch /tmp/lamp-setup-complete
-echo "✅ Basic LAMP setup completed"
-
-# FIXED: Configure Apache load balancer settings (AFTER modules are enabled)
+# Configure Apache load balancer settings
 echo "Configuring Apache for load balancer..."
 cat > /etc/apache2/conf-available/load-balancer.conf << 'EOF'
-# Load balancer configuration
 RemoteIPHeader X-Forwarded-For
 RemoteIPInternalProxy 10.0.0.0/16
 RemoteIPInternalProxy 172.16.0.0/12
 RemoteIPInternalProxy 192.168.0.0/16
 
-# Security headers
 Header always set X-Content-Type-Options nosniff
 Header always set X-Frame-Options DENY
 Header always set X-XSS-Protection "1; mode=block"
 
-# Server status for monitoring (restrict to VPC)
 <Location "/server-status">
     SetHandler server-status
     Require ip 10.0.0.0/16
 </Location>
 
-# Server info for monitoring (restrict to VPC)  
 <Location "/server-info">
     SetHandler server-info
     Require ip 10.0.0.0/16
@@ -143,27 +108,14 @@ EOF
 # Enable the load balancer configuration
 a2enconf load-balancer
 
-# FIXED: Enable server status module for monitoring
-a2enmod status
-
-# FIXED: Test Apache configuration before reloading
+# Test Apache configuration
 echo "Testing Apache configuration..."
 if apache2ctl configtest; then
     echo "✅ Apache configuration is valid"
-    
-    # Reload Apache to apply new configuration
-    if systemctl reload apache2; then
-        echo "✅ Apache reloaded successfully"
-    else
-        echo "❌ Apache reload failed - trying restart"
-        systemctl restart apache2
-        sleep 3
-    fi
+    systemctl reload apache2
 else
     echo "❌ Apache configuration test failed"
     apache2ctl configtest
-    
-    # Disable the problematic config and restart
     a2disconf load-balancer
     systemctl restart apache2
     echo "⚠️ Load balancer config disabled due to errors"
@@ -173,42 +125,85 @@ fi
 INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
 REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "eu-central-1")
 
-# FIXED: Database configuration (non-blocking) with better error handling
-DB_ENDPOINT_FINAL="${db_endpoint}"
-DB_PASSWORD_FINAL="${db_password}"
+# FIXED: Enhanced Database configuration with better error handling
+echo "=== SETTING UP DATABASE CONFIGURATION ==="
 
-echo "Setting up database configuration..."
-echo "Database endpoint: $DB_ENDPOINT_FINAL"
+# Get database parameters from Terraform variables
+DB_ENDPOINT_RAW="${db_endpoint}"
+DB_PASSWORD_RAW="${db_password}"
 
-# Create database config file with validation
+echo "Raw DB endpoint from Terraform: '$DB_ENDPOINT_RAW'"
+echo "DB password length: ${#DB_PASSWORD_RAW}"
+
+# Clean up the variables and validate them
+if [ -n "$DB_ENDPOINT_RAW" ] && [ "$DB_ENDPOINT_RAW" != "\${db_endpoint}" ] && [ "$DB_ENDPOINT_RAW" != "proxy-lamp-mysql-endpoint" ]; then
+    DB_ENDPOINT_FINAL="$DB_ENDPOINT_RAW"
+    echo "✅ Valid database endpoint provided: $DB_ENDPOINT_FINAL"
+else
+    echo "⚠️ Invalid or missing database endpoint: '$DB_ENDPOINT_RAW'"
+    # Try to get it from Terraform outputs
+    if command -v aws >/dev/null 2>&1; then
+        echo "Attempting to get database endpoint from RDS..."
+        DB_ENDPOINT_FINAL=$(aws rds describe-db-instances \
+            --region "$REGION" \
+            --query 'DBInstances[?contains(DBInstanceIdentifier, `proxy-lamp-mysql`)].Endpoint.Address' \
+            --output text 2>/dev/null || echo "")
+        
+        if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "None" ]; then
+            echo "✅ Found database endpoint via RDS API: $DB_ENDPOINT_FINAL"
+        else
+            echo "❌ Could not determine database endpoint"
+            DB_ENDPOINT_FINAL="localhost"
+        fi
+    else
+        echo "❌ AWS CLI not available, using placeholder"
+        DB_ENDPOINT_FINAL="localhost"
+    fi
+fi
+
+if [ -n "$DB_PASSWORD_RAW" ] && [ "$DB_PASSWORD_RAW" != "\${db_password}" ] && [ ${#DB_PASSWORD_RAW} -gt 8 ]; then
+    DB_PASSWORD_FINAL="$DB_PASSWORD_RAW"
+    echo "✅ Valid database password provided"
+else
+    echo "⚠️ Invalid or missing database password"
+    DB_PASSWORD_FINAL="placeholder_password"
+fi
+
+# FIXED: Always create the database config file
+echo "Creating database configuration file..."
 mkdir -p /var/www/html
-if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "\${db_endpoint}" ]; then
-    cat > /var/www/html/.db_config << EOF
+
+cat > /var/www/html/.db_config << EOF
 DB_HOST=$DB_ENDPOINT_FINAL
 DB_USER=admin
 DB_PASSWORD=$DB_PASSWORD_FINAL
 DB_NAME=proxylamptodoapp
 DB_PORT=3306
 EOF
-    chown www-data:www-data /var/www/html/.db_config
-    chmod 600 /var/www/html/.db_config
-    echo "✅ Database config file created"
+
+# Set proper permissions
+chown www-data:www-data /var/www/html/.db_config
+chmod 600 /var/www/html/.db_config
+
+echo "✅ Database config file created"
+echo "Database configuration:"
+echo "  Host: $DB_ENDPOINT_FINAL"
+echo "  User: admin"
+echo "  Database: proxylamptodoapp"
+echo "  Port: 3306"
+
+# Verify the config file was created
+if [ -f /var/www/html/.db_config ]; then
+    echo "✅ Database config file exists and is readable"
+    ls -la /var/www/html/.db_config
 else
-    echo "⚠️ Database endpoint not provided or invalid"
-    # Create a placeholder config
-    cat > /var/www/html/.db_config << EOF
-DB_HOST=localhost
-DB_USER=admin
-DB_PASSWORD=placeholder
-DB_NAME=proxylamptodoapp
-DB_PORT=3306
-EOF
-    chown www-data:www-data /var/www/html/.db_config
-    chmod 600 /var/www/html/.db_config
+    echo "❌ Database config file creation failed"
 fi
 
-# Add to Apache environment
+# Add to Apache environment variables
 cat >> /etc/apache2/envvars << EOF
+
+# Database configuration
 export DB_HOST="$DB_ENDPOINT_FINAL"
 export DB_USER="admin"
 export DB_PASSWORD="$DB_PASSWORD_FINAL"
@@ -216,19 +211,24 @@ export DB_NAME="proxylamptodoapp"
 export DB_PORT="3306"
 EOF
 
-# FIXED: Test database connection in background (non-blocking with better error handling)
-(
-    echo "Testing database connection..."
-    DB_CONNECTION_SUCCESS=false
+# FIXED: Test database connection with proper error handling
+echo "=== TESTING DATABASE CONNECTION ==="
+
+if [ "$DB_ENDPOINT_FINAL" != "localhost" ] && [ "$DB_PASSWORD_FINAL" != "placeholder_password" ]; then
+    echo "Testing database connection to: $DB_ENDPOINT_FINAL"
     
-    for i in {1..30}; do
-        if [ -n "$DB_ENDPOINT_FINAL" ] && [ "$DB_ENDPOINT_FINAL" != "\${db_endpoint}" ] && [ "$DB_ENDPOINT_FINAL" != "localhost" ]; then
-            echo "Attempting database connection to $DB_ENDPOINT_FINAL (attempt $i/30)..."
+    # Test connection in background to avoid blocking
+    (
+        DB_CONNECTION_SUCCESS=false
+        
+        for i in {1..30}; do
+            echo "Database connection attempt $i/30..."
             
             if timeout 10 mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" -e "SELECT 1;" >/dev/null 2>&1; then
-                echo "✅ Database connection successful"
+                echo "✅ Database connection successful!"
                 
                 # Create database and table
+                echo "Creating database and tables..."
                 mysql -h "$DB_ENDPOINT_FINAL" -u admin -p"$DB_PASSWORD_FINAL" << 'MYSQL_EOF'
 CREATE DATABASE IF NOT EXISTS proxylamptodoapp;
 USE proxylamptodoapp;
@@ -242,30 +242,35 @@ CREATE TABLE IF NOT EXISTS tasks (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert a test record
-INSERT INTO tasks (task) VALUES ('Welcome to your Proxy LAMP Stack application!') ON DUPLICATE KEY UPDATE task=task;
+INSERT INTO tasks (task) VALUES ('🎉 Welcome to your Proxy LAMP Stack Todo Application!') ON DUPLICATE KEY UPDATE task=task;
 MYSQL_EOF
-                echo "✅ Database and table created with test data"
+                echo "✅ Database and tables created successfully"
                 DB_CONNECTION_SUCCESS=true
                 break
             else
-                echo "Database connection attempt $i/30 failed"
+                echo "Database connection attempt $i failed"
                 sleep 20
             fi
+        done
+        
+        if [ "$DB_CONNECTION_SUCCESS" = "false" ]; then
+            echo "⚠️ Database connection failed after 30 attempts"
+            echo "This may be normal during initial setup - the application will retry"
+            
+            # Create a status file indicating database connection failed
+            echo "database_connection_failed_during_setup" > /tmp/db_connection_status
         else
-            echo "Invalid database endpoint, skipping connection test"
-            break
+            echo "database_connection_successful" > /tmp/db_connection_status
         fi
-    done
+    ) &
     
-    if [ "$DB_CONNECTION_SUCCESS" = "false" ]; then
-        echo "⚠️ Database connection failed after 30 attempts"
-        echo "Database endpoint: $DB_ENDPOINT_FINAL"
-        echo "This may be normal during initial setup - the application will retry"
-    fi
-) &
+    echo "Database connection test started in background"
+else
+    echo "⚠️ Skipping database connection test - invalid configuration"
+    echo "database_configuration_invalid" > /tmp/db_connection_status
+fi
 
-# FIXED: Install CloudWatch agent in background (non-blocking)
+# Install CloudWatch agent in background
 (
     echo "Installing CloudWatch agent..."
     wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb -O /tmp/cloudwatch-agent.deb 2>/dev/null || {
@@ -276,7 +281,6 @@ MYSQL_EOF
     if dpkg -i /tmp/cloudwatch-agent.deb; then
         echo "✅ CloudWatch agent installed"
         
-        # Create basic CloudWatch config
         mkdir -p /opt/aws/amazon-cloudwatch-agent/etc/
         cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
 {
@@ -301,7 +305,6 @@ MYSQL_EOF
 }
 EOF
         
-        # Start CloudWatch agent
         /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
             -a fetch-config -m ec2 -s \
             -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json 2>/dev/null && {
@@ -314,57 +317,36 @@ EOF
     fi
 ) &
 
-# FIXED: Basic system tuning (continue on failure)
+# Basic system tuning
 echo "Applying system tuning..."
 cat >> /etc/sysctl.conf << 'EOF' 2>/dev/null || true
-# Network performance tuning
 net.core.rmem_max=16777216
 net.core.wmem_max=16777216
 net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl -p >/dev/null 2>&1 || echo "⚠️ sysctl reload failed"
 
-# FIXED: Final comprehensive verification
-sleep 5
+# Create completion marker
+touch /tmp/lamp-setup-complete
+
+# Final verification
 echo "=== FINAL VERIFICATION ==="
 
-# Check Apache status
 if systemctl is-active --quiet apache2; then
     echo "✅ Apache service is active"
 else
-    echo "❌ Apache service is not active - checking status"
+    echo "❌ Apache service is not active"
     systemctl status apache2 --no-pager
 fi
 
-# Check if Apache is responding to HTTP requests
 if curl -s -f http://localhost/ >/dev/null; then
     echo "✅ Apache is responding to HTTP requests"
 else
     echo "❌ Apache is not responding to HTTP requests"
-    
-    # Try to restart Apache one more time
-    echo "Attempting final Apache restart..."
     systemctl restart apache2
     sleep 5
-    
-    if curl -s -f http://localhost/ >/dev/null; then
-        echo "✅ Apache is responding after final restart"
-    else
-        echo "❌ Apache still not responding - printing detailed diagnostics"
-        echo "=== Apache Status ==="
-        systemctl status apache2 --no-pager
-        echo "=== Apache Error Log ==="
-        tail -20 /var/log/apache2/error.log 2>/dev/null || echo "No error log found"
-        echo "=== Apache Configuration Test ==="
-        apache2ctl configtest
-        echo "=== Enabled Modules ==="
-        apache2ctl -M
-        echo "=== Listening Ports ==="
-        netstat -tlnp | grep apache2
-    fi
 fi
 
-# Check PHP
 if php -v >/dev/null 2>&1; then
     echo "✅ PHP is working"
     php -v | head -1
@@ -372,28 +354,39 @@ else
     echo "❌ PHP is not working"
 fi
 
-# Check health endpoint
+if [ -f /var/www/html/.db_config ]; then
+    echo "✅ Database config file exists"
+    echo "Config file permissions: $(ls -la /var/www/html/.db_config)"
+else
+    echo "❌ Database config file missing"
+fi
+
 if curl -s -f http://localhost/health.php >/dev/null; then
     echo "✅ Health endpoint is accessible"
 else
     echo "❌ Health endpoint is not accessible"
 fi
 
-# Ensure proper permissions one more time
+# Ensure proper permissions one final time
 chown -R www-data:www-data /var/www/html
 chmod 755 /var/www/html
 chmod 644 /var/www/html/*
+chmod 600 /var/www/html/.db_config 2>/dev/null || echo "No .db_config to set permissions"
 
 echo "=== LAMP SETUP COMPLETED $(date) ==="
 
-# Final check and report
+# Final status report
+echo "=== SETUP STATUS SUMMARY ==="
+echo "✅ Apache: $(systemctl is-active apache2)"
+echo "✅ PHP: $(php -v | head -1 | cut -d' ' -f2)"
+echo "✅ DirectoryIndex: Configured to prioritize PHP"
+echo "✅ Database config: $([ -f /var/www/html/.db_config ] && echo 'Created' || echo 'Missing')"
+echo "✅ Health endpoint: $(curl -s http://localhost/health.php >/dev/null && echo 'Working' || echo 'Failed')"
+
 if systemctl is-active --quiet apache2 && curl -s -f http://localhost/ >/dev/null; then
-    echo "🎉 SUCCESS: LAMP stack is fully operational"
-    echo "📄 Apache DirectoryIndex configured to prioritize PHP files"
-    echo "🗄️ Database configuration prepared"
-    echo "⏳ Ready for application deployment"
+    echo "🎉 SUCCESS: LAMP stack is fully operational and ready for application deployment"
     exit 0
 else
-    echo "⚠️ WARNING: LAMP stack may have issues but setup completed"
-    exit 0  # Don't fail the entire instance launch
+    echo "⚠️ WARNING: LAMP stack has some issues but basic setup completed"
+    exit 0
 fi
