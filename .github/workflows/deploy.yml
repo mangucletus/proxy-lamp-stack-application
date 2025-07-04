@@ -44,14 +44,11 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    # FIXED: Clean up any existing state issues
     - name: Clean Terraform State
       run: |
         echo "Cleaning up potential state issues..."
         rm -rf .terraform/
         rm -f .terraform.lock.hcl
-        
-        # Format all files to ensure syntax is correct
         terraform fmt -recursive .
         echo "✅ Terraform files formatted"
 
@@ -111,25 +108,21 @@ jobs:
     - name: Wait for Infrastructure to be Ready
       run: |
         echo "Waiting for Auto Scaling Group instances to be ready..."
-        sleep 180  # FIXED: Reduced initial wait to 3 minutes
+        sleep 180
 
     - name: Pre-deployment Verification
       run: |
         echo "=== PRE-DEPLOYMENT VERIFICATION ==="
         
-        # Check if app directory exists
         if [ ! -d "app" ]; then
             echo "❌ App directory not found!"
             exit 1
         fi
         
         cd app
-        
-        # List all files
         echo "Files in app directory:"
         ls -la
         
-        # Check for required files
         REQUIRED_FILES=("index.php" "config.php" "add.php" "delete.php" "health.php" "styles.css")
         MISSING_FILES=()
         
@@ -146,7 +139,6 @@ jobs:
         
         echo "✅ All required files are present"
         
-        # Check PHP syntax
         echo "Checking PHP syntax..."
         for phpfile in *.php; do
             if [ -f "$phpfile" ]; then
@@ -160,11 +152,8 @@ jobs:
         
         echo "✅ All PHP files have valid syntax"
         
-        # Check CSS file
         if [ -f "styles.css" ]; then
             echo "✅ CSS file (styles.css) found"
-            
-            # Basic CSS validation
             if grep -q "body\s*{" styles.css && grep -q "}" styles.css; then
                 echo "✅ CSS file appears to have valid structure"
             else
@@ -185,7 +174,6 @@ jobs:
       run: |
         echo "Getting instance IPs from Auto Scaling Group: $ASG_NAME"
         
-        # FIXED: Wait for instances to appear in ASG (up to 15 minutes)
         echo "=== Waiting for instances to appear in ASG ==="
         for attempt in {1..30}; do
           ALL_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
@@ -207,7 +195,6 @@ jobs:
           fi
         done
         
-        # FIXED: Wait for instances to be in Running state (up to 10 minutes)
         echo "=== Waiting for instances to be in running state ==="
         RUNNING_INSTANCES=""
         for attempt in {1..20}; do
@@ -241,7 +228,6 @@ jobs:
           fi
         done
         
-        # Get IP addresses for running instances
         echo "=== Getting IP addresses for running instances ==="
         INSTANCE_IPS_RAW=$(aws ec2 describe-instances \
           --instance-ids $RUNNING_INSTANCES \
@@ -252,7 +238,6 @@ jobs:
         
         echo "Public IPs: $INSTANCE_IPS"
         
-        # Validate IPs
         if [ -z "$INSTANCE_IPS" ]; then
           echo "❌ No IP addresses found for running instances!"
           exit 1
@@ -279,7 +264,6 @@ jobs:
         IP_COUNT=$(echo $INSTANCE_IPS | wc -w)
         echo "Number of IPs to deploy to: $IP_COUNT"
         
-        # Check application files
         echo "=== Checking available files for deployment ==="
         if [ ! -d "app" ]; then
           echo "❌ App directory not found!"
@@ -291,7 +275,6 @@ jobs:
         SUCCESS_COUNT=0
         TOTAL_COUNT=0
         
-        # Deploy to each instance
         for INSTANCE_IP in $INSTANCE_IPS; do
           echo "===================="
           echo "Deploying to instance: $INSTANCE_IP"
@@ -304,7 +287,6 @@ jobs:
             continue
           fi
           
-          # FIXED: Wait for SSH with reasonable timeout (up to 10 minutes)
           echo "Waiting for SSH connection to $INSTANCE_IP..."
           SSH_SUCCESS=false
           
@@ -323,7 +305,6 @@ jobs:
             continue
           fi
           
-          # FIXED: Check and fix Apache if needed
           echo "Checking Apache status on $INSTANCE_IP..."
           APACHE_STATUS=$(ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
             if systemctl is-active --quiet apache2; then
@@ -336,25 +317,16 @@ jobs:
           if [ "$APACHE_STATUS" != "running" ]; then
             echo "⚠️ Apache is not running on $INSTANCE_IP - attempting to fix..."
             
-            # Try to fix Apache configuration and restart
             ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
               set -e
               echo 'Fixing Apache configuration...'
-              
-              # Enable required modules if not already enabled
               sudo a2enmod remoteip headers rewrite ssl status 2>/dev/null || echo 'Modules already enabled'
-              
-              # Test configuration first
               if ! sudo apache2ctl configtest 2>/dev/null; then
                 echo 'Apache configuration has errors - disabling problematic configs'
                 sudo a2disconf load-balancer 2>/dev/null || true
               fi
-              
-              # Restart Apache
               sudo systemctl restart apache2
               sleep 3
-              
-              # Verify it's running
               if systemctl is-active --quiet apache2; then
                 echo '✅ Apache is now running'
               else
@@ -370,7 +342,6 @@ jobs:
             echo "✅ Apache is already running on $INSTANCE_IP"
           fi
           
-          # FIXED: Check if Apache is responding to HTTP requests
           echo "Testing Apache HTTP response on $INSTANCE_IP..."
           HTTP_SUCCESS=false
           
@@ -403,7 +374,6 @@ jobs:
             continue
           fi
           
-          # FIXED: Copy application files with error handling
           echo "Deploying application files to $INSTANCE_IP..."
           if scp -i private_key.pem -o StrictHostKeyChecking=no -r app/* ubuntu@$INSTANCE_IP:/tmp/ 2>/dev/null; then
             echo "✅ App files copied successfully"
@@ -412,21 +382,17 @@ jobs:
             continue
           fi
           
-          # FIXED: Deploy application with comprehensive error handling and file priority fixes
           echo "Setting up web application on $INSTANCE_IP..."
-          if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
+          DEPLOY_SCRIPT=$(cat << 'DEPLOY_EOF'
             set -e
             echo 'Deploying application files...'
             
-            # Backup existing files
-            sudo cp -r /var/www/html /var/www/html.backup.\$(date +%s) 2>/dev/null || echo 'No existing files to backup'
+            sudo cp -r /var/www/html /var/www/html.backup.$(date +%s) 2>/dev/null || echo 'No existing files to backup'
             
-            # FIXED: Copy new files and ensure index.php overwrites index.html
             echo 'Copying application files...'
             sudo cp /tmp/*.php /var/www/html/ 2>/dev/null && echo 'PHP files copied' || echo 'No PHP files found'
             sudo cp /tmp/*.css /var/www/html/ 2>/dev/null && echo 'CSS files copied' || echo 'No CSS files found'
             
-            # FIXED: Remove placeholder index.html to ensure index.php takes priority
             if [ -f /var/www/html/index.php ]; then
               echo 'Removing placeholder index.html to prioritize index.php'
               sudo rm -f /var/www/html/index.html
@@ -434,95 +400,83 @@ jobs:
               echo '✅ index.php will now be served by default'
             fi
             
-            # FIXED: Configure Apache DirectoryIndex to prioritize PHP files
             echo 'Configuring Apache DirectoryIndex...'
-            sudo bash -c 'cat > /etc/apache2/conf-available/directory-index.conf << \"EOF\"
-DirectoryIndex index.php index.html index.htm
-EOF'
+            sudo bash -c 'cat > /etc/apache2/conf-available/directory-index.conf << "EOF"
+        DirectoryIndex index.php index.html index.htm
+        EOF'
             sudo a2enconf directory-index 2>/dev/null || echo 'DirectoryIndex config already enabled'
             
-            # Set permissions
             sudo chown -R www-data:www-data /var/www/html/
             sudo chmod 755 /var/www/html/
             sudo chmod 644 /var/www/html/*.php 2>/dev/null || echo 'No PHP files to set permissions'
             sudo chmod 644 /var/www/html/*.css 2>/dev/null || echo 'No CSS files to set permissions'
             
-            # Validate PHP syntax
             echo 'Validating PHP syntax...'
             for phpfile in /var/www/html/*.php; do
-              if [ -f \"\$phpfile\" ]; then
-                if ! php -l \"\$phpfile\" >/dev/null 2>&1; then
-                  echo \"❌ PHP syntax error in \$phpfile\"
-                  php -l \"\$phpfile\" || true
+              if [ -f "$phpfile" ]; then
+                if ! php -l "$phpfile" >/dev/null 2>&1; then
+                  echo "❌ PHP syntax error in $phpfile"
+                  php -l "$phpfile" || true
                   exit 1
                 fi
               fi
             done
             echo '✅ All PHP files have valid syntax'
             
-            # FIXED: Test database connection and configuration
             echo 'Testing database configuration...'
             if [ -f /var/www/html/.db_config ]; then
               echo 'Database config file exists'
-              
-              # Source the database config
               source /var/www/html/.db_config
               
-              # Test if we can connect to the database
-              if [ \"\$DB_HOST\" != \"localhost\" ] && [ \"\$DB_HOST\" != \"placeholder\" ] && [ -n \"\$DB_HOST\" ]; then
-                echo \"Testing connection to database: \$DB_HOST\"
+              if [ "$DB_HOST" != "localhost" ] && [ "$DB_HOST" != "placeholder" ] && [ -n "$DB_HOST" ]; then
+                echo "Testing connection to database: $DB_HOST"
                 
-                # Try to connect to database with a reasonable timeout
-                if timeout 15 mysql -h \"\$DB_HOST\" -u \"\$DB_USER\" -p\"\$DB_PASSWORD\" -e \"SELECT 1;\" >/dev/null 2>&1; then
+                if timeout 15 mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
                   echo '✅ Database connection successful'
                   
-                  # Test if our database and table exist
-                  if mysql -h \"\$DB_HOST\" -u \"\$DB_USER\" -p\"\$DB_PASSWORD\" -e \"USE \$DB_NAME; SHOW TABLES LIKE 'tasks';\" 2>/dev/null | grep -q 'tasks'; then
+                  if mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" -e "USE $DB_NAME; SHOW TABLES LIKE 'tasks';" 2>/dev/null | grep -q 'tasks'; then
                     echo '✅ Application database and tables are ready'
                   else
                     echo '⚠️ Creating database and tables...'
-                    mysql -h \"\$DB_HOST\" -u \"\$DB_USER\" -p\"\$DB_PASSWORD\" << 'MYSQL_EOF'
-CREATE DATABASE IF NOT EXISTS proxylamptodoapp;
-USE proxylamptodoapp;
-CREATE TABLE IF NOT EXISTS tasks (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    task VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    status ENUM('pending','completed') DEFAULT 'pending',
-    INDEX idx_created_at (created_at),
-    INDEX idx_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                    mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" << 'MYSQL_EOF'
+        CREATE DATABASE IF NOT EXISTS proxylamptodoapp;
+        USE proxylamptodoapp;
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            task VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            status ENUM('pending','completed') DEFAULT 'pending',
+            INDEX idx_created_at (created_at),
+            INDEX idx_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO tasks (task) VALUES ('🎉 Welcome to your Proxy LAMP Stack Todo Application!') ON DUPLICATE KEY UPDATE task=task;
-MYSQL_EOF
+        INSERT INTO tasks (task) VALUES ('🎉 Welcome to your Proxy LAMP Stack Todo Application!') ON DUPLICATE KEY UPDATE task=task;
+        MYSQL_EOF
                     echo '✅ Database and tables created successfully'
                   fi
                 else
                   echo '⚠️ Database connection failed - application may not work properly'
-                  echo 'Database host: '\"\$DB_HOST\"
+                  echo "Database host: $DB_HOST"
                   echo 'This might be due to timing - database may not be ready yet'
                 fi
               else
                 echo '⚠️ Database configuration appears to be placeholder or invalid'
-                echo 'DB_HOST: '\"\$DB_HOST\"
+                echo "DB_HOST: $DB_HOST"
               fi
             else
               echo '❌ Database config file not found'
               exit 1
             fi
             
-            # Test Apache configuration
             echo 'Testing Apache configuration...'
             if ! sudo apache2ctl configtest 2>/dev/null; then
               echo '❌ Apache configuration test failed'
               sudo apache2ctl configtest 2>&1 || true
               
-              # Try to fix common issues
               echo 'Attempting to fix Apache configuration...'
               sudo a2enmod remoteip headers rewrite ssl status 2>/dev/null || true
               
-              # Test again
               if ! sudo apache2ctl configtest 2>/dev/null; then
                 echo 'Configuration still has issues - disabling custom configs'
                 sudo a2disconf load-balancer 2>/dev/null || true
@@ -530,7 +484,6 @@ MYSQL_EOF
             fi
             echo '✅ Apache configuration is valid'
             
-            # Restart Apache to ensure clean state and apply DirectoryIndex changes
             echo 'Restarting Apache...'
             if sudo systemctl restart apache2; then
               echo '✅ Apache restarted successfully'
@@ -542,68 +495,58 @@ MYSQL_EOF
             
             sleep 5
             
-            # FIXED: Test final connectivity multiple times with specific checks
             echo 'Testing final connectivity...'
             SUCCESS=false
             for attempt in {1..15}; do
-              # Test if index.php is being served (not index.html)
-              RESPONSE=\$(curl -s http://localhost/ | head -1)
-              if echo \"\$RESPONSE\" | grep -q \"DOCTYPE html\" && ! echo \"\$RESPONSE\" | grep -q \"LAMP Stack Ready\"; then
-                echo \"✅ Application is responding with proper content (attempt \$attempt)\"
+              RESPONSE=$(curl -s http://localhost/ | head -1)
+              if echo "$RESPONSE" | grep -q "DOCTYPE html" && ! echo "$RESPONSE" | grep -q "LAMP Stack Ready"; then
+                echo "✅ Application is responding with proper content (attempt $attempt)"
                 SUCCESS=true
                 break
               elif curl -s -f http://localhost/ > /dev/null; then
-                echo \"⏳ Server responding but may be serving wrong content (attempt \$attempt)\"
+                echo "⏳ Server responding but may be serving wrong content (attempt $attempt)"
                 sleep 2
               else
-                echo \"⏳ Application test failed, attempt \$attempt/15\"
+                echo "⏳ Application test failed, attempt $attempt/15"
                 sleep 2
               fi
             done
             
-            if [ \"\$SUCCESS\" = false ]; then
+            if [ "$SUCCESS" = false ]; then
               echo '❌ Application is not responding properly after deployment'
               echo 'Final diagnostics:'
-              
-              # Check what files are in the web directory
               echo '=== Web Directory Contents ==='
               ls -la /var/www/html/
-              
-              # Check what Apache is actually serving
               echo '=== Testing what Apache serves ==='
               curl -s http://localhost/ | head -5
-              
-              # Check Apache status
               sudo systemctl status apache2 --no-pager || true
               sudo tail -5 /var/log/apache2/error.log 2>/dev/null || echo 'No error log'
               ps aux | grep apache2 | head -3
               exit 1
             fi
             
-            # FIXED: Test health endpoint specifically with better error handling
             echo 'Testing health endpoint...'
             HEALTH_SUCCESS=false
             for attempt in {1..10}; do
-              HEALTH_RESPONSE=\$(curl -s http://localhost/health.php 2>/dev/null || echo 'failed')
-              if echo \"\$HEALTH_RESPONSE\" | grep -q '\"status\"'; then
+              HEALTH_RESPONSE=$(curl -s http://localhost/health.php 2>/dev/null || echo 'failed')
+              if echo "$HEALTH_RESPONSE" | grep -q '"status"'; then
                 echo '✅ Health endpoint is responding with JSON'
                 HEALTH_SUCCESS=true
                 break
               else
-                echo \"⏳ Health endpoint test attempt \$attempt/10\"
+                echo "⏳ Health endpoint test attempt $attempt/10"
                 sleep 2
               fi
             done
             
-            if [ \"\$HEALTH_SUCCESS\" = false ]; then
+            if [ "$HEALTH_SUCCESS" = false ]; then
               echo '⚠️ Health endpoint is not responding properly'
               echo 'Testing direct health endpoint:'
               curl -v http://localhost/health.php || echo 'Health endpoint test failed'
             fi
             
-            # FIXED: Test the main application pages
             echo 'Testing main application functionality...'
-            if curl -s http://localhost/ | grep -q \"Proxy LAMP Stack\"; then
+            if curl -s http://localhost/ | grep -q "Proxy LAMP Stack"; then
               echo '✅ Main application page is accessible and contains expected content'
             else
               echo '⚠️ Main application page may not be correct'
@@ -612,14 +555,15 @@ MYSQL_EOF
             fi
             
             echo '✅ Application deployment successful'
-          "; then
+        DEPLOY_EOF
+          )
+          
+          if ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "$DEPLOY_SCRIPT"; then
             echo "✅ Successfully deployed to $INSTANCE_IP"
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
             
-            # FIXED: Additional verification of successful deployment
             echo "=== Post-deployment Verification for $INSTANCE_IP ==="
             
-            # Check what's actually being served
             MAIN_PAGE_TEST=$(ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "curl -s http://localhost/ | head -2" 2>/dev/null || echo "test failed")
             if echo "$MAIN_PAGE_TEST" | grep -q "Proxy LAMP Stack"; then
               echo "✅ Main application is being served correctly"
@@ -628,7 +572,6 @@ MYSQL_EOF
               echo "Response: $MAIN_PAGE_TEST"
             fi
             
-            # Check health endpoint
             HEALTH_TEST=$(ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "curl -s http://localhost/health.php | head -1" 2>/dev/null || echo "health test failed")
             if echo "$HEALTH_TEST" | grep -q '"status"'; then
               echo "✅ Health endpoint working"
@@ -639,7 +582,6 @@ MYSQL_EOF
           else
             echo "❌ Deployment failed on $INSTANCE_IP"
             
-            # Get additional diagnostics
             echo "=== Additional Diagnostics for $INSTANCE_IP ==="
             ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "
               echo 'System load:'
@@ -671,14 +613,12 @@ MYSQL_EOF
           echo "🎉 Application deployed successfully to $SUCCESS_COUNT instance(s)!"
           echo "🌐 Access your load-balanced application at: http://$LOAD_BALANCER_DNS"
           
-          # FIXED: Update ASG health check type to ELB after successful deployment
           echo "Updating Auto Scaling Group health check type to ELB..."
           aws autoscaling update-auto-scaling-group \
             --auto-scaling-group-name "${{ needs.terraform.outputs.autoscaling_group_name }}" \
             --health-check-type ELB \
             --health-check-grace-period 300 || echo "Warning: Could not update health check type"
             
-          # Provide helpful links
           echo ""
           echo "=== USEFUL LINKS ==="
           echo "🌐 Application: http://$LOAD_BALANCER_DNS"
@@ -708,36 +648,31 @@ MYSQL_EOF
         LOAD_BALANCER_DNS: ${{ needs.terraform.outputs.load_balancer_dns }}
       run: |
         echo "Waiting for load balancer and application to be fully ready..."
-        sleep 120  # FIXED: Reduced initial wait time
+        sleep 120
         
         echo "Load balancer DNS: $LOAD_BALANCER_DNS"
         
-        # FIXED: Test load balancer endpoint with more reasonable attempts
         HEALTH_SUCCESS=false
         APP_SUCCESS=false
         
         for i in {1..30}; do
           echo "Testing load balancer... attempt $i/30"
           
-          # Test health endpoint
           if curl -f -s -m 15 "http://$LOAD_BALANCER_DNS/health.php" > /dev/null 2>&1; then
             echo "✅ Health endpoint is responding!"
             HEALTH_SUCCESS=true
           fi
           
-          # Test main application
           if curl -f -s -m 15 "http://$LOAD_BALANCER_DNS/" > /dev/null 2>&1; then
             echo "✅ Main application is responding!"
             APP_SUCCESS=true
           fi
           
-          # If both are working, we're good
           if [ "$HEALTH_SUCCESS" = "true" ] && [ "$APP_SUCCESS" = "true" ]; then
             echo "✅ Both health check and application are responding!"
             break
           fi
           
-          # If at least one is working, continue with lighter checks
           if [ "$HEALTH_SUCCESS" = "true" ] || [ "$APP_SUCCESS" = "true" ]; then
             echo "⏳ Partial success, continuing checks..."
           else
@@ -747,33 +682,27 @@ MYSQL_EOF
           if [ $i -eq 30 ]; then
             echo "❌ Health checks did not pass after 30 attempts"
             
-            # FIXED: Provide detailed debugging information
             echo "🔍 Debugging information:"
             echo "Load balancer DNS: $LOAD_BALANCER_DNS"
             
-            # Test DNS resolution
             if nslookup "$LOAD_BALANCER_DNS" > /dev/null 2>&1; then
               echo "✅ DNS resolution works"
             else
               echo "❌ DNS resolution failed"
             fi
             
-            # Test basic connectivity
             if ping -c 3 "$LOAD_BALANCER_DNS" > /dev/null 2>&1; then
               echo "✅ Load balancer is reachable via ping"
             else
               echo "❌ Load balancer is not reachable via ping"
             fi
             
-            # Detailed HTTP test for health endpoint
             echo "Detailed health endpoint test:"
             curl -v -m 15 "http://$LOAD_BALANCER_DNS/health.php" 2>&1 || echo "Health endpoint test failed"
             
-            # Detailed HTTP test for main app
             echo "Detailed main application test:"
             curl -v -m 15 "http://$LOAD_BALANCER_DNS/" 2>&1 || echo "Main application test failed"
             
-            # Check load balancer target health
             echo "Checking load balancer target health..."
             LB_ARN=$(aws elbv2 describe-load-balancers --names "*proxy-lamp*" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "unknown")
             if [ "$LB_ARN" != "unknown" ] && [ "$LB_ARN" != "None" ]; then
@@ -784,7 +713,6 @@ MYSQL_EOF
               fi
             fi
             
-            # Don't fail the deployment if health checks are partial
             if [ "$HEALTH_SUCCESS" = "true" ] || [ "$APP_SUCCESS" = "true" ]; then
               echo "⚠️ Partial health check success - deployment considered successful"
               echo "🌐 Try accessing: http://$LOAD_BALANCER_DNS"
@@ -794,7 +722,7 @@ MYSQL_EOF
               exit 1
             fi
           else
-            sleep 60  # FIXED: Wait 1 minute between attempts
+            sleep 60
           fi
         done
         
@@ -805,10 +733,8 @@ MYSQL_EOF
         echo "📊 AWS Console: https://console.aws.amazon.com/ec2/home?region=${{ env.AWS_REGION }}"
         echo ""
         
-        # FIXED: Final verification with detailed status
         echo "=== FINAL VERIFICATION ==="
         
-        # Test health endpoint one more time
         if curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/health.php" > /tmp/final_health.json 2>/dev/null; then
           echo "✅ Health endpoint final test: PASSED"
           if command -v jq >/dev/null 2>&1 && [ -f /tmp/final_health.json ]; then
@@ -817,7 +743,6 @@ MYSQL_EOF
             echo "   Status: $HEALTH_STATUS"
             echo "   Server: $SERVER_NAME"
             
-            # Show database status
             DB_STATUS=$(jq -r '.checks.database.status // "unknown"' /tmp/final_health.json 2>/dev/null || echo "unknown")
             echo "   Database: $DB_STATUS"
           fi
@@ -825,7 +750,6 @@ MYSQL_EOF
           echo "⚠️ Health endpoint final test: FAILED"
         fi
         
-        # Test main application one more time
         if curl -f -s -m 10 "http://$LOAD_BALANCER_DNS/" > /dev/null 2>/dev/null; then
           echo "✅ Main application final test: PASSED"
         else
